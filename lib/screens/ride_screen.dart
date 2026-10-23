@@ -1,559 +1,418 @@
-import 'dart:async';
 import 'dart:math' as math;
-import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:provider/provider.dart';
-import 'package:fl_chart/fl_chart.dart';
-import '../services/ride_service.dart';
 
-class RideScreen extends StatefulWidget {
+import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../config/app_config.dart';
+import '../core/analysis/ride_analyzer.dart';
+import '../models/ride_sample.dart';
+import '../services/app_state.dart';
+import '../services/ride_controller.dart';
+import '../services/sensor_feed.dart';
+import '../theme/app_theme.dart';
+import '../widgets/common.dart';
+import '../widgets/gauges.dart';
+import '../widgets/sync_indicator.dart';
+import 'ride_summary_screen.dart';
+
+class RideScreen extends StatelessWidget {
   const RideScreen({super.key});
 
   @override
-  State<RideScreen> createState() => _RideScreenState();
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider(
+      create: (context) => RideController(
+        app: context.read<AppState>(),
+        feed: SensorFeed(context.read<SensorSource>()),
+      )..start(),
+      child: const _RideView(),
+    );
+  }
 }
 
-class _RideScreenState extends State<RideScreen> with TickerProviderStateMixin {
-  late AnimationController _glowController;
-  late Animation<double> _glowAnimation;
-  Timer? _durationTimer;
-  Duration _currentDuration = Duration.zero;
+class _RideView extends StatefulWidget {
+  const _RideView();
 
   @override
-  void initState() {
-    super.initState();
-    _glowController = AnimationController(
-      duration: const Duration(milliseconds: 2000),
-      vsync: this,
-    )..repeat(reverse: true);
-    
-    _glowAnimation = Tween<double>(begin: 0.3, end: 0.8).animate(
-      CurvedAnimation(parent: _glowController, curve: Curves.easeInOut),
+  State<_RideView> createState() => _RideViewState();
+}
+
+class _RideViewState extends State<_RideView> {
+  bool _stopping = false;
+
+  Future<void> _stop() async {
+    if (_stopping) return;
+    setState(() => _stopping = true);
+    final summary = await context.read<RideController>().stop();
+    if (!mounted) return;
+    if (summary == null) {
+      Navigator.of(context).pop();
+      return;
+    }
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute<void>(
+        builder: (_) => RideSummaryScreen(summary: summary),
+      ),
     );
-    
-    _durationTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      final rideService = context.read<RideService>();
-      if (rideService.isRiding) {
-        setState(() {
-          _currentDuration = rideService.rideDuration;
-        });
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _glowController.dispose();
-    _durationTimer?.cancel();
-    super.dispose();
-  }
-
-  void _stopRide() {
-    final rideService = context.read<RideService>();
-    rideService.stopRide();
-    Navigator.of(context).pop();
-  }
-
-  String _formatDuration(Duration duration) {
-    final hours = duration.inHours;
-    final minutes = duration.inMinutes.remainder(60);
-    final seconds = duration.inSeconds.remainder(60);
-    if (hours > 0) {
-      return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
-    }
-    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
-  }
-
-  String _formatDistance(double meters) {
-    if (meters < 1000) {
-      return '${meters.toStringAsFixed(0)} m';
-    }
-    return '${(meters / 1000).toStringAsFixed(2)} km';
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Color(0xFF0A0E21),
-              Color(0xFF1A1A2E),
-              Color(0xFF16213E),
-            ],
-          ),
-        ),
-        child: SafeArea(
-          child: Consumer<RideService>(
-            builder: (context, rideService, child) {
-              final data = rideService.currentData;
-              
-              return Column(
-                children: [
-                  _buildHeader(),
-                  const SizedBox(height: 16),
-                  _buildSpeedometer(data.speed, data.maxSpeed),
-                  const SizedBox(height: 24),
-                  _buildStatsRow(data, rideService),
-                  const SizedBox(height: 16),
-                  _buildRotationIndicators(data),
-                  const SizedBox(height: 16),
-                  Expanded(child: _buildSpeedChart(rideService)),
-                  _buildStopButton(),
-                  const SizedBox(height: 20),
-                ],
-              );
-            },
-          ),
-        ),
-      ),
-    );
-  }
+    final c = context.watch<RideController>();
+    final bike = context.read<AppState>().bike!;
+    final s = c.state;
+    final window = c.window;
 
-  Widget _buildHeader() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 12,
-                height: 12,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: const Color(0xFFFF4B4B),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFFFF4B4B).withOpacity(0.5),
-                      blurRadius: 10,
-                      spreadRadius: 2,
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'RIDE IN PROGRESS',
-                style: GoogleFonts.orbitron(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: const Color(0xFFFF4B4B),
-                  letterSpacing: 2,
-                ),
-              ),
-            ],
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1D1E33),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.white10),
-            ),
-            child: Row(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _stop();
+      },
+      child: Scaffold(
+        body: GradientBackground(
+          child: SafeArea(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
               children: [
-                const Icon(Icons.timer, color: Color(0xFF00D9FF), size: 18),
-                const SizedBox(width: 8),
-                Text(
-                  _formatDuration(_currentDuration),
-                  style: GoogleFonts.orbitron(
-                    fontSize: 16,
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
+                _Header(elapsed: c.elapsed),
+                if (!c.gpsAvailable)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8),
+                    child: WarningBanner(
+                      icon: Icons.gps_off,
+                      text:
+                          'GPS unavailable - speed, distance and stop '
+                          'times are paused. Lean still works.',
+                    ),
+                  ),
+                if (c.sensorError != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: WarningBanner(
+                      color: AppColors.red,
+                      text: c.sensorError!,
+                    ),
+                  ),
+                const SizedBox(height: 16),
+                Center(
+                  child: SpeedGauge(
+                    speedKmh: s?.speedKmh ?? 0,
+                    scaleMaxKmh: bike.ratedTopSpeedKmh,
+                    maxSpeedKmh: c.totals.maxSpeedKmh,
+                    reliable: s?.speedReliable ?? false,
                   ),
                 ),
+                const SizedBox(height: 12),
+                Center(
+                  child: LeanGauge(
+                    leanDeg: s?.leanDeg ?? 0,
+                    maxLeftDeg: window.maxLeanLeftDeg,
+                    maxRightDeg: window.maxLeanRightDeg,
+                  ),
+                ),
+                if ((s?.straightOffsetDeg.abs() ?? 0) >= 1 ||
+                    (s?.mountRealignments ?? 0) > 0)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(
+                      'Mount normalized by '
+                      '${s!.straightOffsetDeg.abs().toStringAsFixed(1)}°'
+                      '${s.mountRealignments > 0 ? ' · re-aligned ${s.mountRealignments}×' : ''}',
+                      textAlign: TextAlign.center,
+                      style: AppText.body(13, color: AppColors.textFaint),
+                    ),
+                  ),
+                const SizedBox(height: 16),
+                _WindowCard(controller: c, window: window),
+                const SizedBox(height: 12),
+                SizedBox(height: 170, child: _SpeedChart(samples: c.chart)),
+                const SizedBox(height: 20),
+                _HoldToStopButton(onStop: _stop, busy: _stopping),
               ],
             ),
           ),
-        ],
+        ),
       ),
     );
   }
+}
 
-  Widget _buildSpeedometer(double speed, double maxSpeed) {
-    return AnimatedBuilder(
-      animation: _glowAnimation,
-      builder: (context, child) {
-        return Container(
-          width: 220,
-          height: 220,
+class _Header extends StatelessWidget {
+  const _Header({required this.elapsed});
+
+  final Duration elapsed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 12,
+          height: 12,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            gradient: RadialGradient(
-              colors: [
-                const Color(0xFF1D1E33),
-                const Color(0xFF0A0E21).withOpacity(0.8),
-              ],
-            ),
+            color: AppColors.red,
             boxShadow: [
               BoxShadow(
-                color: const Color(0xFF00D9FF).withOpacity(_glowAnimation.value * 0.3),
-                blurRadius: 30,
-                spreadRadius: 5,
-              ),
-              BoxShadow(
-                color: const Color(0xFFFF4B4B).withOpacity(_glowAnimation.value * 0.2),
-                blurRadius: 40,
-                spreadRadius: 10,
-              ),
-            ],
-            border: Border.all(
-              color: const Color(0xFF00D9FF).withOpacity(0.3),
-              width: 3,
-            ),
-          ),
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              // Speed arc
-              CustomPaint(
-                size: const Size(200, 200),
-                painter: SpeedArcPainter(
-                  speed: speed,
-                  maxSpeed: 200,
-                ),
-              ),
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    speed.toStringAsFixed(0),
-                    style: GoogleFonts.orbitron(
-                      fontSize: 56,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                  Text(
-                    'KM/H',
-                    style: GoogleFonts.rajdhani(
-                      fontSize: 16,
-                      color: const Color(0xFF00D9FF),
-                      letterSpacing: 4,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFF4B4B).withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      'MAX ${maxSpeed.toStringAsFixed(0)}',
-                      style: GoogleFonts.rajdhani(
-                        fontSize: 12,
-                        color: const Color(0xFFFF4B4B),
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ],
+                color: AppColors.red.withValues(alpha: 0.5),
+                blurRadius: 10,
+                spreadRadius: 2,
               ),
             ],
           ),
-        );
-      },
-    );
-  }
-
-  Widget _buildStatsRow(data, RideService rideService) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Row(
-        children: [
-          Expanded(
-            child: _buildStatCard(
-              'DISTANCE',
-              _formatDistance(data.distance),
-              Icons.route,
-              const Color(0xFF00D9FF),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _buildStatCard(
-              'ACCEL',
-              '${data.acceleration.toStringAsFixed(1)} m/s²',
-              Icons.speed,
-              const Color(0xFFFF4B4B),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _buildStatCard(
-              'STOP TIME',
-              '${data.estimatedStopTime.toStringAsFixed(1)}s',
-              Icons.stop_circle_outlined,
-              const Color(0xFFFFAB00),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatCard(String label, String value, IconData icon, Color color) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1D1E33),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
-      child: Column(
-        children: [
-          Icon(icon, color: color, size: 20),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: GoogleFonts.orbitron(
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            style: GoogleFonts.rajdhani(
-              fontSize: 10,
-              color: Colors.white54,
-              letterSpacing: 1,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildRotationIndicators(data) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1D1E33),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white10),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'ROTATION SENSORS',
-              style: GoogleFonts.rajdhani(
-                fontSize: 12,
-                color: Colors.white54,
-                letterSpacing: 2,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildRotationBar('ROLL', data.rotationX, const Color(0xFFFF4B4B)),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildRotationBar('PITCH', data.rotationY, const Color(0xFF00D9FF)),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildRotationBar('YAW', data.rotationZ, const Color(0xFFFFAB00)),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRotationBar(String label, double value, Color color) {
-    final normalizedValue = (value.abs() / 5).clamp(0.0, 1.0);
-    
-    return Column(
-      children: [
-        Text(
-          label,
-          style: GoogleFonts.rajdhani(
-            fontSize: 10,
-            color: Colors.white38,
-            letterSpacing: 1,
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            'RIDING',
+            style: AppText.display(
+              14,
+              color: AppColors.red,
+            ).copyWith(letterSpacing: 2),
           ),
         ),
-        const SizedBox(height: 6),
+        const SyncIndicator(),
         Container(
-          height: 6,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
           decoration: BoxDecoration(
-            color: Colors.white10,
-            borderRadius: BorderRadius.circular(3),
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppColors.border),
           ),
-          child: FractionallySizedBox(
-            alignment: Alignment.centerLeft,
-            widthFactor: normalizedValue,
-            child: Container(
-              decoration: BoxDecoration(
-                color: color,
-                borderRadius: BorderRadius.circular(3),
-                boxShadow: [
-                  BoxShadow(
-                    color: color.withOpacity(0.5),
-                    blurRadius: 6,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          '${value.toStringAsFixed(2)} r/s',
-          style: GoogleFonts.orbitron(
-            fontSize: 10,
-            color: Colors.white70,
+          child: Row(
+            children: [
+              const Icon(Icons.timer, color: AppColors.cyan, size: 16),
+              const SizedBox(width: 6),
+              Text(formatDuration(elapsed), style: AppText.display(15)),
+            ],
           ),
         ),
       ],
     );
   }
+}
 
-  Widget _buildSpeedChart(RideService rideService) {
-    final history = rideService.speedHistory;
-    
-    if (history.length < 2) {
-      return Center(
-        child: Text(
-          'Collecting speed data...',
-          style: GoogleFonts.rajdhani(
-            fontSize: 14,
-            color: Colors.white38,
+/// Analysis over the rolling "last N minutes" buffer.
+class _WindowCard extends StatelessWidget {
+  const _WindowCard({required this.controller, required this.window});
+
+  final RideController controller;
+  final RideStats window;
+
+  @override
+  Widget build(BuildContext context) {
+    return SectionCard(
+      title: 'LAST ${AppConfig.analysisWindowMinutes} MIN',
+      child: Column(
+        children: [
+          GridView.count(
+            crossAxisCount: 3,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            childAspectRatio: 1.05,
+            children: [
+              StatTile(
+                label: 'TOP SPEED',
+                value: window.maxSpeedKmh.toStringAsFixed(0),
+                icon: Icons.speed,
+              ),
+              StatTile(
+                label: 'MAX LEAN L',
+                value: '${window.maxLeanLeftDeg.toStringAsFixed(0)}°',
+                icon: Icons.turn_left,
+                color: AppColors.amber,
+              ),
+              StatTile(
+                label: 'MAX LEAN R',
+                value: '${window.maxLeanRightDeg.toStringAsFixed(0)}°',
+                icon: Icons.turn_right,
+                color: AppColors.amber,
+              ),
+              StatTile(
+                label: 'MAX STOP TIME',
+                value: '${window.maxStopTimeS.toStringAsFixed(1)}s',
+                icon: Icons.stop_circle_outlined,
+                color: AppColors.red,
+              ),
+              StatTile(
+                label: 'BEST DECEL',
+                value: window.bestDecelMps2.toStringAsFixed(1),
+                icon: Icons.south,
+                color: AppColors.red,
+              ),
+              StatTile(
+                label: 'DISTANCE',
+                value: formatDistance(window.distanceM),
+                icon: Icons.route,
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              const Icon(
+                Icons.timer_outlined,
+                size: 16,
+                color: AppColors.textMuted,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Stop from here: ~${controller.estimatedStopTimeS.toStringAsFixed(1)} s'
+                  ' (your measured braking)',
+                  style: AppText.body(14, color: AppColors.textMuted),
+                ),
+              ),
+            ],
+          ),
+          if (controller.lastBrake != null) ...[
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                const Icon(Icons.history, size: 16, color: AppColors.textMuted),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Last stop: ${controller.lastBrake!.startSpeedKmh.toStringAsFixed(0)} km/h '
+                    'in ${controller.lastBrake!.durationS.toStringAsFixed(1)} s, '
+                    '${controller.lastBrake!.distanceM.toStringAsFixed(0)} m',
+                    style: AppText.body(14, color: AppColors.textMuted),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _SpeedChart extends StatelessWidget {
+  const _SpeedChart({required this.samples});
+
+  final List<RideSample> samples;
+
+  @override
+  Widget build(BuildContext context) {
+    if (samples.length < 2) {
+      return SectionCard(
+        title: 'SPEED & LEAN',
+        child: Center(
+          child: Text(
+            'Collecting data...',
+            style: AppText.body(14, color: AppColors.textFaint),
           ),
         ),
       );
     }
+    final t0 = samples.first.time;
+    double x(RideSample s) => s.time.difference(t0).inMilliseconds / 1000;
+    // Thin out to ~1 point per second; the chart does not need 10 Hz.
+    final step = math.max(1, samples.length ~/ 120);
+    final pts = [for (var i = 0; i < samples.length; i += step) samples[i]];
+    final top = pts.map((s) => s.speedKmh).fold<double>(0, math.max);
+    final maxY = math.max(60.0, (top / 50).ceil() * 50.0);
+    // Lean is drawn on the same axis: 0..maxY maps to -60..+60°.
+    double leanY(double deg) => maxY / 2 + deg.clamp(-60, 60) / 60 * maxY / 2;
 
-    final spots = history.asMap().entries.map((entry) {
-      return FlSpot(entry.key.toDouble(), entry.value.speed);
-    }).toList();
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1D1E33),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white10),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'SPEED HISTORY',
-              style: GoogleFonts.rajdhani(
-                fontSize: 12,
-                color: Colors.white54,
-                letterSpacing: 2,
-                fontWeight: FontWeight.bold,
-              ),
+    return SectionCard(
+      title: 'SPEED & LEAN · LAST 2 MIN',
+      padding: const EdgeInsets.fromLTRB(8, 16, 16, 8),
+      child: Expanded(
+        child: LineChart(
+          duration: Duration.zero,
+          LineChartData(
+            minX: 0,
+            maxX: x(pts.last),
+            minY: 0,
+            maxY: maxY,
+            borderData: FlBorderData(show: false),
+            lineTouchData: const LineTouchData(enabled: false),
+            gridData: FlGridData(
+              drawVerticalLine: false,
+              horizontalInterval: maxY / 4,
+              getDrawingHorizontalLine: (_) =>
+                  const FlLine(color: AppColors.border, strokeWidth: 1),
             ),
-            const SizedBox(height: 12),
-            Expanded(
-              child: LineChart(
-                LineChartData(
-                  gridData: FlGridData(
-                    show: true,
-                    drawVerticalLine: false,
-                    horizontalInterval: 50,
-                    getDrawingHorizontalLine: (value) {
-                      return FlLine(
-                        color: Colors.white10,
-                        strokeWidth: 1,
-                      );
-                    },
+            titlesData: FlTitlesData(
+              topTitles: const AxisTitles(),
+              rightTitles: const AxisTitles(),
+              bottomTitles: const AxisTitles(),
+              leftTitles: AxisTitles(
+                sideTitles: SideTitles(
+                  showTitles: true,
+                  reservedSize: 32,
+                  interval: maxY / 4,
+                  getTitlesWidget: (v, _) => Text(
+                    v.toStringAsFixed(0),
+                    style: AppText.body(10, color: AppColors.textFaint),
                   ),
-                  titlesData: FlTitlesData(
-                    show: true,
-                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    leftTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        interval: 50,
-                        reservedSize: 40,
-                        getTitlesWidget: (value, meta) {
-                          return Text(
-                            value.toInt().toString(),
-                            style: GoogleFonts.rajdhani(
-                              fontSize: 10,
-                              color: Colors.white38,
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                  borderData: FlBorderData(show: false),
-                  minX: 0,
-                  maxX: (history.length - 1).toDouble(),
-                  minY: 0,
-                  maxY: 200,
-                  lineBarsData: [
-                    LineChartBarData(
-                      spots: spots,
-                      isCurved: true,
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF00D9FF), Color(0xFFFF4B4B)],
-                      ),
-                      barWidth: 3,
-                      isStrokeCapRound: true,
-                      dotData: const FlDotData(show: false),
-                      belowBarData: BarAreaData(
-                        show: true,
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            const Color(0xFF00D9FF).withOpacity(0.3),
-                            const Color(0xFF00D9FF).withOpacity(0.0),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
                 ),
               ),
             ),
-          ],
+            lineBarsData: [
+              LineChartBarData(
+                spots: [for (final s in pts) FlSpot(x(s), s.speedKmh)],
+                isCurved: true,
+                color: AppColors.cyan,
+                barWidth: 3,
+                dotData: const FlDotData(show: false),
+                belowBarData: BarAreaData(
+                  show: true,
+                  color: AppColors.cyan.withValues(alpha: 0.12),
+                ),
+              ),
+              LineChartBarData(
+                spots: [for (final s in pts) FlSpot(x(s), leanY(s.leanDeg))],
+                isCurved: true,
+                color: AppColors.amber,
+                barWidth: 2,
+                dotData: const FlDotData(show: false),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
+}
 
-  Widget _buildStopButton() {
+/// Stopping needs a deliberate long press so a glove brush can't end the
+/// recording.
+class _HoldToStopButton extends StatelessWidget {
+  const _HoldToStopButton({required this.onStop, required this.busy});
+
+  final VoidCallback onStop;
+  final bool busy;
+
+  @override
+  Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: _stopRide,
+      key: const Key('stop-ride'),
+      onLongPress: busy ? null : onStop,
+      onTap: busy
+          ? null
+          : () => ScaffoldMessenger.of(context)
+              ..hideCurrentSnackBar()
+              ..showSnackBar(
+                const SnackBar(
+                  content: Text('Hold the button to stop the ride'),
+                ),
+              ),
       child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 20),
         padding: const EdgeInsets.symmetric(vertical: 16),
         decoration: BoxDecoration(
           gradient: const LinearGradient(
-            colors: [Color(0xFFFF4B4B), Color(0xFFFF2E2E)],
+            colors: [AppColors.red, AppColors.redDeep],
           ),
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFFFF4B4B).withOpacity(0.4),
+              color: AppColors.red.withValues(alpha: 0.4),
               blurRadius: 20,
               spreadRadius: 2,
             ),
@@ -562,16 +421,21 @@ class _RideScreenState extends State<RideScreen> with TickerProviderStateMixin {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.stop, color: Colors.white, size: 24),
+            if (busy)
+              const SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  color: Colors.white,
+                ),
+              )
+            else
+              const Icon(Icons.stop, color: Colors.white),
             const SizedBox(width: 12),
             Text(
-              'STOP RIDE',
-              style: GoogleFonts.orbitron(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-                letterSpacing: 3,
-              ),
+              'HOLD TO STOP',
+              style: AppText.display(16).copyWith(letterSpacing: 3),
             ),
           ],
         ),
@@ -579,64 +443,3 @@ class _RideScreenState extends State<RideScreen> with TickerProviderStateMixin {
     );
   }
 }
-
-class SpeedArcPainter extends CustomPainter {
-  final double speed;
-  final double maxSpeed;
-
-  SpeedArcPainter({required this.speed, required this.maxSpeed});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.width / 2 - 15;
-    
-    // Background arc
-    final bgPaint = Paint()
-      ..color = Colors.white10
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 8
-      ..strokeCap = StrokeCap.round;
-    
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius),
-      math.pi * 0.75,
-      math.pi * 1.5,
-      false,
-      bgPaint,
-    );
-    
-    // Speed arc
-    final speedRatio = (speed / maxSpeed).clamp(0.0, 1.0);
-    final gradient = SweepGradient(
-      startAngle: math.pi * 0.75,
-      endAngle: math.pi * 2.25,
-      colors: const [
-        Color(0xFF00D9FF),
-        Color(0xFFFFAB00),
-        Color(0xFFFF4B4B),
-      ],
-    );
-    
-    final speedPaint = Paint()
-      ..shader = gradient.createShader(Rect.fromCircle(center: center, radius: radius))
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 8
-      ..strokeCap = StrokeCap.round;
-    
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius),
-      math.pi * 0.75,
-      math.pi * 1.5 * speedRatio,
-      false,
-      speedPaint,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant SpeedArcPainter oldDelegate) {
-    return oldDelegate.speed != speed;
-  }
-}
-
-

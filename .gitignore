@@ -43,3 +43,9 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Backend / docker
+.env
+__pycache__/
+*.pyc
+.pytest_cache/

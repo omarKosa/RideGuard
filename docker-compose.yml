@@ -1,0 +1,52 @@
+# RideGuard backend: Postgres + API.
+#   docker compose up -d --build          # start
+#   docker compose --profile test run --rm api-test   # backend tests
+name: rideguard
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-rideguard}
+      POSTGRES_USER: ${POSTGRES_USER:-rideguard}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rideguard}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Only reachable from this machine (psql / GUI tools).
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ./backend
+      target: runtime
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-rideguard}:${POSTGRES_PASSWORD:-rideguard}@db:5432/${POSTGRES_DB:-rideguard}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      db:
+        condition: service_healthy
+    # Published on all interfaces so a phone on the same Wi-Fi can upload.
+    ports:
+      - "${API_PORT:-8000}:8000"
+
+  api-test:
+    profiles: ["test"]
+    build:
+      context: ./backend
+      target: test
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-rideguard}:${POSTGRES_PASSWORD:-rideguard}@db:5432/${POSTGRES_DB:-rideguard}
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

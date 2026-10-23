@@ -1,15 +1,20 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Location permissions for GPS-based speed and distance tracking -->
+    <!-- GPS speed, distance and braking analysis -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Uploading ride data to the RideGuard backend -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- Optional: allow posting notifications (Android 13+) if you add them later -->
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Lean angle needs a gyroscope; speed needs GPS -->
+    <uses-feature android:name="android.hardware.sensor.gyroscope" android:required="true" />
+    <uses-feature android:name="android.hardware.sensor.accelerometer" android:required="true" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="true" />
 
     <application
-        android:label="rideGuard"
+        android:label="RideGuard"
         android:name="${applicationName}"
+        android:usesCleartextTraffic="true"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"

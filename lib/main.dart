@@ -1,51 +1,49 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:provider/provider.dart';
-import 'services/ride_service.dart';
-import 'screens/home_screen.dart';
+import 'package:path_provider/path_provider.dart';
 
-void main() {
+import 'app.dart';
+import 'data/api_client.dart';
+import 'data/local_store.dart';
+import 'data/outbox.dart';
+import 'data/remote_repository.dart';
+import 'data/sync_service.dart';
+import 'services/app_state.dart';
+import 'services/sensor_feed.dart';
+
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-  ]);
+  await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.light,
     ),
   );
-  runApp(const MotorcycleRiderApp());
+
+  final store = await LocalStore.open();
+  final docs = await getApplicationDocumentsDirectory();
+
+  // The API URL lives in AppState (editable in Settings); the client reads
+  // it on every request.
+  late final AppState appState;
+  final api = ApiClient(baseUrl: () => appState.apiUrl);
+  final sync = SyncService(
+    api: api,
+    store: FileOutboxStore(Directory('${docs.path}/outbox')),
+  );
+  appState = AppState(store: store, remote: RemoteRepository(sync));
+  await appState.load();
+  await sync.init();
+
+  runApp(
+    RideGuardApp(
+      appState: appState,
+      sync: sync,
+      api: api,
+      sensors: DeviceSensorSource(),
+    ),
+  );
 }
-
-class MotorcycleRiderApp extends StatelessWidget {
-  const MotorcycleRiderApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => RideService(),
-      child: MaterialApp(
-        title: 'MotoTrack',
-        debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-          useMaterial3: true,
-          brightness: Brightness.dark,
-          scaffoldBackgroundColor: const Color(0xFF0A0E21),
-          colorScheme: const ColorScheme.dark(
-            primary: Color(0xFFFF4B4B),
-            secondary: Color(0xFF00D9FF),
-            surface: Color(0xFF1D1E33),
-            background: Color(0xFF0A0E21),
-          ),
-          textTheme: GoogleFonts.rajdhaniTextTheme(
-            ThemeData.dark().textTheme,
-          ),
-        ),
-        home: const HomeScreen(),
-      ),
-    );
-  }
-}
-
