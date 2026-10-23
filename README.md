@@ -2,11 +2,14 @@
 
 Motorcycle ride analytics on a phone: calibrated **lean angle**, **top speed**
 and **braking / stop time**, analysed over a rolling window of the last
-15 minutes and stored in Postgres through a small API.
+15 minutes and stored in Postgres through a small API. It also watches for
+**crashes, speed wobbles and other anomalies**, and after a crash calls an
+emergency contact unless the rider cancels.
 
 ```
 lib/            Flutter app
-  core/         Pure Dart: sensor fusion, rolling buffer, analysis, calibration
+  core/         Pure Dart: sensor fusion, rolling buffer, analysis, calibration,
+                crash / wobble detection (core/safety)
   data/         Backend client, offline outbox, local storage
   services/     Sensor binding and the ride / calibration controllers
   screens/      UI
@@ -76,6 +79,72 @@ enforces the same ranges with CHECK constraints.
 `GET /v1/rides/{id}/analysis` recomputes the window metrics from the raw
 samples as an independent check of what the phone reported.
 
+### 6. Crashes, wobbles and anomalies
+`core/safety/safety_monitor.dart` reads the **raw 50 Hz IMU**. The 10 Hz
+processed stream is too slow for a 4-10 Hz wobble or a 50 ms impact. It runs
+during rides and during the init ride.
+
+| Hazard | Detected when | Response |
+|---|---|---|
+| **Crash** | A ≥ 4 g impact while riding, then stopped for 5 s; **or** the bike lies on its side (gravity ≥ 60° from the bike's up axis) for 3 s within a minute of riding | Loud looping alarm at full alarm volume + vibration, 30 s countdown, then **calls the emergency contact** |
+| **Speed wobble** | Rotation ≥ 0.5 rad/s RMS reversing 3-12 times a second for 0.6 s, above 30 km/h | Short alert sound + vibration + on-screen warning |
+| **Impact** | A ≥ 4 g jolt that the rider rides through (pothole, kerb) | Same as wobble |
+| **Extreme lean** | ≥ 55° for 0.5 s above 20 km/h | Same as wobble |
+
+* Turns, swerves, slaloms (≤ 1.5 Hz), emergency stops (a 9 m/s² stop tilts
+  the gravity reading only to ~42°) and the side stand never trigger, and
+  the tests check this for odd mounts too.
+* Crash detection only arms after the bike has moved at 15+ km/h, and
+  disarms after firing until it moves again. A bike knocked over in the
+  garage, or one still lying where it fell, doesn't set it off.
+* The rider cancels with a **long press** on "I'M OK", because rain or
+  debris on the screen of a fallen phone can register as taps. Stopping
+  the ride also cancels. Back is ignored while the alert is up.
+* The emergency contact is set in **Settings**. It stays on the phone and
+  is never uploaded. Saving it asks for the Android "Phone" permission up
+  front. Without that permission, the app opens the dialer with the number
+  instead of calling. If there's no contact, or the call fails, the alarm
+  keeps sounding so people nearby notice.
+* Every incident is uploaded through the outbox. A crash is uploaded when
+  detected (`pending`) and again when resolved (`cancelled`, `called`,
+  `dialer_opened`, `call_failed` or `no_contact`).
+
+The thresholds in the table are defaults. Each bike and mount learns its
+own (next section).
+
+### 7. Learning to avoid false alarms
+Every ride, starting with the init ride, teaches the app what *normal*
+riding looks like on this phone, bike and mount
+(`core/safety/safety_baseline.dart`):
+
+* **What's measured:** for each second of steady riding (20+ km/h), the
+  strongest wobble-band oscillation and the biggest jolt. Seconds within 5 s
+  of any detected hazard are left out, so a real wobble never becomes
+  "normal". The phone's actual sensor rate is measured too.
+* **Memory:** the most recent rides covering about 3 hours of riding.
+  Older rides are dropped, so after you fix a rattling mount, sensitivity
+  comes back by itself.
+* **Thresholds** sit well above the 99th percentile of normal riding, so
+  one pothole doesn't move them: wobble = 3× the normal oscillation and
+  impact = 1.25× the normal peak. They only ever **rise from the defaults,
+  never past a cap** (wobble 1.0 rad/s, impact 6 g, lean 65°), so learning
+  can't switch detection off. At least 60 s of riding is needed before
+  anything changes.
+* **Rider feedback:** the ride summary lists each alert, and a warning can
+  be marked **NOT REAL**. That threshold then moves just above the event
+  (wobble +15%, impact +10%, lean +3°), still within its cap.
+* **Crashes never loosen.** A crash cancelled with "I'M OK" may still have
+  been a real crash, so cancellations are only counted.
+* **Setup warnings:** the init ride result and Settings → Safety learning
+  say when the mount vibrates so much that alerts sit at their least
+  sensitive, or when the phone's sensor rate is too slow for fast wobbles
+  (it needs about 4 samples per oscillation).
+* Redoing the init ride (possibly a new mount) starts learning over, and
+  Settings can reset it manually.
+* Each ride uploads its statistics and the thresholds it used
+  (`safety_stats`), and incidents carry the rider's `false_alarm` label.
+  The server keeps the evidence needed to tune the defaults across riders.
+
 ## Run the backend
 
 ```bash
@@ -134,6 +203,8 @@ acceleration and braking, with the phone mounted at any rotation.
 | PUT | `/v1/rides/{id}/summary` | Finish: totals, window stats, brake events |
 | GET | `/v1/rides/{id}/analysis?window_min=15` | Server-side window recomputation (default 15) |
 | PUT/GET | `/v1/calibrations/{id}` | Calibration result (immutable) |
+| PUT | `/v1/rides/{id}/incidents/{incident_id}` | Crash / wobble / impact / extreme lean (upsert; a crash moves from `pending` to its outcome once; warnings can get `false_alarm`) |
+| GET | `/v1/rides/{id}/incidents` | A ride's incidents in order |
 | GET | `/health` | API + database health |
 
 ## Safety
@@ -152,3 +223,12 @@ Every task except "hold still" can be skipped.
   beyond a trusted network.
 * The Android application id is still `com.example.motorcycle_rider_app`.
   Change it before publishing.
+* Crash and wobble thresholds are set from physics and checked against the
+  simulator, not tuned on real crash data. Learning only adapts them to
+  what *normal* riding looks like. It can't prove that a real crash or
+  wobble is caught, so field-test on your own mount (Settings → Test alarm
+  checks the alarm itself).
+* Detection runs while the ride screen is open, which the app keeps awake.
+  It doesn't run in the background or after the app is killed. Calling
+  without a tap works on Android only. Android always opens the dialer
+  for emergency numbers such as 112/911, so the contact should be a person.

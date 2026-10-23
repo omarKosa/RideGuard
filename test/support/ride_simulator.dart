@@ -92,11 +92,17 @@ class RideSimulator {
 
   /// Runs [seconds] of simulated time. [accel] gives forward acceleration
   /// and [leanAt] the desired lean (deg), both as a function of local time.
+  /// [extraRate] and [extraAccel] add bike-frame rotation (rad/s) and
+  /// specific force (m/s²) on top, e.g. a wobble or an impact. With
+  /// [coordinated] false a moving bike leans without turning (falling over).
   void run(
     MotionPipeline p,
     double seconds, {
     double Function(double tLocal)? accel,
     double Function(double tLocal)? leanAt,
+    Vec3 Function(double tLocal)? extraRate,
+    Vec3 Function(double tLocal)? extraAccel,
+    bool coordinated = true,
     void Function(SimTick tick)? onTick,
   }) {
     final dt = 1 / imuHz;
@@ -113,18 +119,19 @@ class RideSimulator {
       t += dt;
 
       // Coordinated turn when moving; plain tilt (stand) when stopped.
-      final moving = v > 0.5;
+      final moving = v > 0.5 && coordinated;
       final ac = moving ? gravity * math.tan(lean) : 0.0; // + towards right
       final omega = moving ? -ac / v : 0.0; // about world up, + = left
       final c = math.cos(lean), s = math.sin(lean);
 
-      final specific = Vec3(
-        effectiveA,
-        -(ac * c - gravity * s),
-        ac * s + gravity * c,
-      );
+      final extra = extraAccel?.call(local) ?? Vec3.zero;
+      final specific =
+          Vec3(effectiveA, -(ac * c - gravity * s), ac * s + gravity * c) +
+          extra;
       final reaction = Vec3(0, gravity * s, gravity * c);
-      final rate = Vec3(rollRate, omega * s, omega * c);
+      final rate =
+          Vec3(rollRate, omega * s, omega * c) +
+          (extraRate?.call(local) ?? Vec3.zero);
 
       p.addAccel(mount.apply(specific) + _noise(accelNoise), t);
       p.addLinearAccel(
@@ -213,6 +220,77 @@ class RideSimulator {
     final secs = v / decel + 0.5;
     run(p, secs, accel: (_) => -decel, leanAt: (_) => 0, onTick: onTick);
   }
+
+  /// Speed wobble: the chassis yaws ±[amplitudeDeg] (and rolls a third of
+  /// that) [hz] times a second.
+  void wobble(
+    MotionPipeline p,
+    double hz,
+    double amplitudeDeg,
+    double seconds, {
+    void Function(SimTick)? onTick,
+  }) {
+    final w = 2 * math.pi * hz;
+    final peakRate = degToRad(amplitudeDeg) * w;
+    run(
+      p,
+      seconds,
+      onTick: onTick,
+      leanAt: (_) => 0,
+      extraRate: (tl) => Vec3(
+        peakRate / 3 * math.cos(w * tl + 0.5),
+        0,
+        peakRate * math.cos(w * tl),
+      ),
+    );
+  }
+
+  /// Slalom: lean swings ±[amplitudeDeg] [hz] times a second.
+  void weave(
+    MotionPipeline p,
+    double hz,
+    double amplitudeDeg,
+    double seconds, {
+    void Function(SimTick)? onTick,
+  }) => run(
+    p,
+    seconds,
+    onTick: onTick,
+    leanAt: (tl) => amplitudeDeg * math.sin(2 * math.pi * hz * tl),
+  );
+
+  /// A jolt of [g] through the chassis for [duration] seconds.
+  void impact(
+    MotionPipeline p, {
+    double g = 5,
+    double duration = 0.06,
+    void Function(SimTick)? onTick,
+  }) => run(
+    p,
+    duration,
+    onTick: onTick,
+    extraAccel: (_) => Vec3(0, 0, g * gravity),
+  );
+
+  /// Low-side crash: the bike falls onto its side within [fallTime], hits
+  /// the ground and slides to a stop at [decel].
+  void lowside(
+    MotionPipeline p, {
+    double decel = 6,
+    double fallDeg = 85,
+    double fallTime = 0.6,
+    void Function(SimTick)? onTick,
+  }) => run(
+    p,
+    v / decel + 0.3,
+    onTick: onTick,
+    coordinated: false,
+    accel: (_) => -decel,
+    leanAt: (tl) => fallDeg * math.min(1, tl / fallTime),
+    extraAccel: (tl) => tl >= fallTime && tl < fallTime + 0.06
+        ? Vec3(0, 0, 6 * gravity)
+        : Vec3.zero,
+  );
 
   Vec3 _noise(double sigma) => Vec3(_gauss(), _gauss(), _gauss()) * sigma;
 

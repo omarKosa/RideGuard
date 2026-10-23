@@ -80,7 +80,10 @@ class RideRecorder {
     _remote.addSamples(rideId, batch);
   }
 
-  Future<RideSummary> finish({RideStatus status = RideStatus.completed}) async {
+  Future<RideSummary> finish({
+    RideStatus status = RideStatus.completed,
+    Map<String, dynamic>? safetyStats,
+  }) async {
     final now = _clock();
     _flush(now);
     final summary = RideSummary(
@@ -95,6 +98,7 @@ class RideRecorder {
       brakeEvents: List.of(analyzer.events),
       mountRealignments: _realignments,
       sampleCount: _seq,
+      safetyStats: safetyStats,
     );
     await _remote.finishRide(summary);
     return summary;

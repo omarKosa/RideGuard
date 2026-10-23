@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../models/bike_profile.dart';
 import '../models/calibration_profile.dart';
+import '../models/incident.dart';
 import '../models/ride_sample.dart';
 import '../models/ride_summary.dart';
 import 'sync_service.dart';
@@ -56,5 +57,12 @@ class RemoteRepository {
     'PUT',
     '/v1/calibrations/${profile.id}',
     profile.toApiJson(),
+  );
+
+  /// Upsert: a crash is sent when detected and again once resolved.
+  Future<void> saveIncident(Incident incident) => _sync.enqueue(
+    'PUT',
+    '/v1/rides/${incident.rideId}/incidents/${incident.id}',
+    incident.toApiJson(),
   );
 }

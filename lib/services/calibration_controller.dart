@@ -6,12 +6,16 @@ import 'package:uuid/uuid.dart';
 
 import '../core/calibration/calibration_session.dart';
 import '../core/fusion/motion_pipeline.dart';
+import '../core/safety/safety_baseline.dart';
+import '../core/safety/safety_monitor.dart';
+import '../core/safety/safety_tuning.dart';
 import '../models/calibration_profile.dart';
 import '../models/ride_summary.dart';
 import 'app_state.dart';
 import 'calibration_profile_builder.dart';
 import 'keep_awake.dart';
 import 'ride_recorder.dart';
+import 'safety_controller.dart';
 import 'sensor_feed.dart';
 
 enum CalibrationPhase { idle, starting, running, finished, aborted }
@@ -23,15 +27,18 @@ class CalibrationController extends ChangeNotifier {
   CalibrationController({
     required AppState app,
     required SensorFeed feed,
+    SafetyController? safety,
     DateTime Function()? clock,
     KeepAwake? keepAwake,
   }) : _app = app,
        _feed = feed,
+       _safety = safety,
        _clock = clock ?? DateTime.now,
        _keepAwake = keepAwake ?? keepScreenAwake;
 
   final AppState _app;
   final SensorFeed _feed;
+  final SafetyController? _safety;
   final DateTime Function() _clock;
   final KeepAwake _keepAwake;
   static const _uuid = Uuid();
@@ -39,6 +46,9 @@ class CalibrationController extends ChangeNotifier {
   MotionPipeline? _pipeline;
   CalibrationSession? _session;
   RideRecorder? _recorder;
+  SafetyMonitor? _monitor;
+  RideNoise? _noise;
+  SafetyBaseline? _safetyBaseline;
   MotionState? _state;
   CalibrationProfile? _result;
   CalibrationTask? _lastTask;
@@ -49,6 +59,10 @@ class CalibrationController extends ChangeNotifier {
   CalibrationSession? get session => _session;
   MotionState? get state => _state;
   CalibrationProfile? get result => _result;
+
+  /// What the init ride learned about normal riding on this mount; saved
+  /// with the calibration.
+  SafetyBaseline? get safetyBaseline => _safetyBaseline;
   CalibrationPhase get phase => _phase;
 
   /// Sensors are live (starting up or recording).
@@ -80,7 +94,14 @@ class CalibrationController extends ChangeNotifier {
     await _recorder!.start();
     // Best effort; never delay recording on a plugin call.
     unawaited(_keepAwake(true));
-    await _feed.start(pipeline, _onTick);
+    // The top-speed run and the hard stop are the riskiest part of using the
+    // app, so crash detection runs here too.
+    final safety = _safety?..begin(_recorder!.rideId);
+    // Possibly a new mount: start from default sensitivity.
+    _monitor = safety == null ? null : SafetyMonitor(onHazard: safety.report);
+    _noise = null;
+    _safetyBaseline = null;
+    await _feed.start(pipeline, _onTick, safety: _monitor);
     if (_phase == CalibrationPhase.starting) _phase = CalibrationPhase.running;
     _notify();
   }
@@ -131,27 +152,50 @@ class CalibrationController extends ChangeNotifier {
 
   Future<RideSummary?> _stop(RideStatus status) async {
     await _feed.stop();
+    _safety?.end();
     unawaited(_keepAwake(false));
-    return _recorder?.finish(status: status);
+    final noise = _noise = _monitor?.takeNoise();
+    return _recorder?.finish(
+      status: status,
+      safetyStats: noise?.toApiJson(SafetyTuning.defaults),
+    );
   }
 
-  /// Saves the result as the active calibration.
+  /// Saves the result as the active calibration, with what was learned
+  /// about this mount's vibration.
   Future<void> accept() async {
     final result = _result;
     if (result == null) return;
     await _app.saveCalibration(result);
+    await _app.saveSafetyBaseline(
+      _safetyBaseline ?? SafetyBaseline(calibrationId: result.id),
+    );
   }
 
   CalibrationProfile? _buildProfile(RideSummary? summary) {
     final bike = _app.bike;
     if (bike == null || summary == null) return null;
+    final id = _uuid.v4();
+    final noise = _noise;
+    final baseline = noise == null
+        ? null
+        : SafetyBaseline(calibrationId: id).withRide(noise);
+    _safetyBaseline = baseline;
     return buildCalibrationProfile(
-      id: _uuid.v4(),
+      id: id,
       bikeId: bike.id,
       summary: summary,
       session: _session!,
       pipeline: _pipeline!,
       calibratedAt: _clock(),
+      extraWarnings: [
+        if (baseline != null &&
+            baseline.ridingSeconds < SafetyBaseline.minRidingSeconds)
+          'Not enough riding at 20+ km/h to learn how this mount vibrates: '
+              'safety alerts start at default sensitivity and adapt as you '
+              'ride.',
+        ...?baseline?.tuning.warnings,
+      ],
     );
   }
 
@@ -165,6 +209,7 @@ class CalibrationController extends ChangeNotifier {
     if (running) {
       _phase = CalibrationPhase.aborted;
       _feed.stop();
+      _safety?.end();
       unawaited(_keepAwake(false));
       _recorder?.finish(status: RideStatus.aborted);
     }

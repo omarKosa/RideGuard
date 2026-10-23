@@ -8,11 +8,14 @@ import '../config/app_config.dart';
 import '../core/analysis/ride_analyzer.dart';
 import '../models/ride_sample.dart';
 import '../services/app_state.dart';
+import '../services/emergency_platform.dart';
 import '../services/ride_controller.dart';
+import '../services/safety_controller.dart';
 import '../services/sensor_feed.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/gauges.dart';
+import '../widgets/safety_overlay.dart';
 import '../widgets/sync_indicator.dart';
 import 'ride_summary_screen.dart';
 
@@ -21,11 +24,22 @@ class RideScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (context) => RideController(
-        app: context.read<AppState>(),
-        feed: SensorFeed(context.read<SensorSource>()),
-      )..start(),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(
+          create: (context) => SafetyController(
+            app: context.read<AppState>(),
+            platform: context.read<EmergencyPlatform>(),
+          ),
+        ),
+        ChangeNotifierProvider(
+          create: (context) => RideController(
+            app: context.read<AppState>(),
+            feed: SensorFeed(context.read<SensorSource>()),
+            safety: context.read<SafetyController>(),
+          )..start(),
+        ),
+      ],
       child: const _RideView(),
     );
   }
@@ -46,13 +60,15 @@ class _RideViewState extends State<_RideView> {
     setState(() => _stopping = true);
     final summary = await context.read<RideController>().stop();
     if (!mounted) return;
+    final incidents = context.read<SafetyController>().incidents;
     if (summary == null) {
       Navigator.of(context).pop();
       return;
     }
     Navigator.of(context).pushReplacement(
       MaterialPageRoute<void>(
-        builder: (_) => RideSummaryScreen(summary: summary),
+        builder: (_) =>
+            RideSummaryScreen(summary: summary, incidents: incidents),
       ),
     );
   }
@@ -60,76 +76,93 @@ class _RideViewState extends State<_RideView> {
   @override
   Widget build(BuildContext context) {
     final c = context.watch<RideController>();
-    final bike = context.read<AppState>().bike!;
+    final app = context.watch<AppState>();
+    final bike = app.bike!;
     final s = c.state;
     final window = c.window;
 
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) _stop();
+        // Back must not end the ride (and cancel the crash call) while the
+        // crash alert is up.
+        final alerting =
+            context.read<SafetyController>().phase != SafetyPhase.idle;
+        if (!didPop && !alerting) _stop();
       },
-      child: Scaffold(
-        body: GradientBackground(
-          child: SafeArea(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-              children: [
-                _Header(elapsed: c.elapsed),
-                if (!c.gpsAvailable)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 8),
-                    child: WarningBanner(
-                      icon: Icons.gps_off,
-                      text:
-                          'GPS unavailable - speed, distance and stop '
-                          'times are paused. Lean still works.',
+      child: SafetyLayer(
+        child: Scaffold(
+          body: GradientBackground(
+            child: SafeArea(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                children: [
+                  _Header(elapsed: c.elapsed),
+                  if (app.emergencyContact == null)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: WarningBanner(
+                        icon: Icons.contact_phone_outlined,
+                        text:
+                            'No emergency contact: a crash will sound the '
+                            'alarm but call no one. Add one in Settings.',
+                      ),
+                    ),
+                  if (!c.gpsAvailable)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: WarningBanner(
+                        icon: Icons.gps_off,
+                        text:
+                            'GPS unavailable - speed, distance and stop '
+                            'times are paused. Lean still works.',
+                      ),
+                    ),
+                  if (c.sensorError != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: WarningBanner(
+                        color: AppColors.red,
+                        text: c.sensorError!,
+                      ),
+                    ),
+                  const SizedBox(height: 16),
+                  Center(
+                    child: SpeedGauge(
+                      speedKmh: s?.speedKmh ?? 0,
+                      scaleMaxKmh: bike.ratedTopSpeedKmh,
+                      maxSpeedKmh: c.totals.maxSpeedKmh,
+                      reliable: s?.speedReliable ?? false,
                     ),
                   ),
-                if (c.sensorError != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: WarningBanner(
-                      color: AppColors.red,
-                      text: c.sensorError!,
+                  const SizedBox(height: 12),
+                  Center(
+                    child: LeanGauge(
+                      leanDeg: s?.leanDeg ?? 0,
+                      maxLeftDeg: window.maxLeanLeftDeg,
+                      maxRightDeg: window.maxLeanRightDeg,
                     ),
                   ),
-                const SizedBox(height: 16),
-                Center(
-                  child: SpeedGauge(
-                    speedKmh: s?.speedKmh ?? 0,
-                    scaleMaxKmh: bike.ratedTopSpeedKmh,
-                    maxSpeedKmh: c.totals.maxSpeedKmh,
-                    reliable: s?.speedReliable ?? false,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Center(
-                  child: LeanGauge(
-                    leanDeg: s?.leanDeg ?? 0,
-                    maxLeftDeg: window.maxLeanLeftDeg,
-                    maxRightDeg: window.maxLeanRightDeg,
-                  ),
-                ),
-                if ((s?.straightOffsetDeg.abs() ?? 0) >= 1 ||
-                    (s?.mountRealignments ?? 0) > 0)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text(
-                      'Mount normalized by '
-                      '${s!.straightOffsetDeg.abs().toStringAsFixed(1)}°'
-                      '${s.mountRealignments > 0 ? ' · re-aligned ${s.mountRealignments}×' : ''}',
-                      textAlign: TextAlign.center,
-                      style: AppText.body(13, color: AppColors.textFaint),
+                  if ((s?.straightOffsetDeg.abs() ?? 0) >= 1 ||
+                      (s?.mountRealignments ?? 0) > 0)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        'Mount normalized by '
+                        '${s!.straightOffsetDeg.abs().toStringAsFixed(1)}°'
+                        '${s.mountRealignments > 0 ? ' · re-aligned ${s.mountRealignments}×' : ''}',
+                        textAlign: TextAlign.center,
+                        style: AppText.body(13, color: AppColors.textFaint),
+                      ),
                     ),
-                  ),
-                const SizedBox(height: 16),
-                _WindowCard(controller: c, window: window),
-                const SizedBox(height: 12),
-                SizedBox(height: 170, child: _SpeedChart(samples: c.chart)),
-                const SizedBox(height: 20),
-                _HoldToStopButton(onStop: _stop, busy: _stopping),
-              ],
+                  const SizedBox(height: 16),
+                  _WindowCard(controller: c, window: window),
+                  const SizedBox(height: 12),
+                  SizedBox(height: 170, child: _SpeedChart(samples: c.chart)),
+                  const SizedBox(height: 20),
+                  _HoldToStopButton(onStop: _stop, busy: _stopping),
+                ],
+              ),
             ),
           ),
         ),

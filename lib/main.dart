@@ -11,6 +11,7 @@ import 'data/outbox.dart';
 import 'data/remote_repository.dart';
 import 'data/sync_service.dart';
 import 'services/app_state.dart';
+import 'services/emergency_platform.dart';
 import 'services/sensor_feed.dart';
 
 Future<void> main() async {
@@ -44,6 +45,7 @@ Future<void> main() async {
       sync: sync,
       api: api,
       sensors: DeviceSensorSource(),
+      emergency: const DeviceEmergencyPlatform(),
     ),
   );
 }

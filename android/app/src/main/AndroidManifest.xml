@@ -5,11 +5,16 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <!-- Uploading ride data to the RideGuard backend -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Crash response: alarm vibration and calling the emergency contact -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.CALL_PHONE" />
 
     <!-- Lean angle needs a gyroscope; speed needs GPS -->
     <uses-feature android:name="android.hardware.sensor.gyroscope" android:required="true" />
     <uses-feature android:name="android.hardware.sensor.accelerometer" android:required="true" />
     <uses-feature android:name="android.hardware.location.gps" android:required="true" />
+    <!-- CALL_PHONE would otherwise hide the app from devices without a SIM -->
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
     <application
         android:label="RideGuard"

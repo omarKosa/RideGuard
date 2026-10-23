@@ -38,7 +38,7 @@ async def client():
         async with app.state.pool.acquire() as conn:
             await conn.execute(
                 "TRUNCATE riders, bikes, rides, calibrations, ride_samples, "
-                "brake_events CASCADE"
+                "brake_events, incidents CASCADE"
             )
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:

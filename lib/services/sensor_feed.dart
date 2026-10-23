@@ -7,6 +7,7 @@ import 'package:sensors_plus/sensors_plus.dart';
 import '../config/app_config.dart';
 import '../core/fusion/motion_pipeline.dart';
 import '../core/math/vec3.dart';
+import '../core/safety/safety_monitor.dart';
 
 class ImuEvent {
   const ImuEvent(this.value, this.timestamp);
@@ -105,7 +106,8 @@ class DeviceSensorSource implements SensorSource {
 }
 
 /// Wires a [SensorSource] into a [MotionPipeline] and emits a processed
-/// [MotionState] at [AppConfig.sampleHz].
+/// [MotionState] at [AppConfig.sampleHz]. A [SafetyMonitor] gets the raw IMU
+/// readings at full rate (crash impacts and wobbles are too fast for 10 Hz).
 class SensorFeed {
   /// [clock] returns monotonic seconds; defaults to a stopwatch started with
   /// the feed. Injectable so recorded/simulated data can be replayed.
@@ -128,8 +130,9 @@ class SensorFeed {
 
   Future<void> start(
     MotionPipeline pipeline,
-    void Function(MotionState state) onTick,
-  ) async {
+    void Function(MotionState state) onTick, {
+    SafetyMonitor? safety,
+  }) async {
     await stop();
     sensorError = null;
     gpsAvailable = await _source.requestLocation() == LocationAccess.granted;
@@ -145,10 +148,11 @@ class SensorFeed {
 
     _subs
       ..add(
-        _source.accelerometer().listen(
-          (e) => pipeline.addAccel(e.value, _now),
-          onError: onError,
-        ),
+        _source.accelerometer().listen((e) {
+          final t = _now;
+          pipeline.addAccel(e.value, t);
+          safety?.addAccel(e.value, t);
+        }, onError: onError),
       )
       ..add(
         _source.userAccelerometer().listen(
@@ -159,7 +163,9 @@ class SensorFeed {
       ..add(
         _source.gyroscope().listen((e) {
           final t = _now;
-          pipeline.addGyro(e.value, t, _gyroDt(e.timestamp, t));
+          final dt = _gyroDt(e.timestamp, t);
+          pipeline.addGyro(e.value, t, dt);
+          safety?.addGyro(e.value, t, dt);
         }, onError: onError),
       );
 
@@ -186,7 +192,11 @@ class SensorFeed {
 
     _ticker = Timer.periodic(
       Duration(microseconds: 1000000 ~/ AppConfig.sampleHz),
-      (_) => onTick(pipeline.snapshot()),
+      (_) {
+        final state = pipeline.snapshot();
+        safety?.update(state, pipeline.mount);
+        onTick(state);
+      },
     );
   }
 

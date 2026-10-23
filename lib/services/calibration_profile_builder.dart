@@ -12,6 +12,7 @@ CalibrationProfile? buildCalibrationProfile({
   required CalibrationSession session,
   required MotionPipeline pipeline,
   required DateTime calibratedAt,
+  List<String> extraWarnings = const [],
 }) {
   final params = pipeline.params;
   if (params == null) return null;
@@ -65,6 +66,6 @@ CalibrationProfile? buildCalibrationProfile({
     achievedTopSpeedKmh: session.achievedTopSpeedKmh,
     brakeEvent: session.brakeEvent,
     skippedTasks: [for (final t in session.skippedTasks) t.name],
-    warnings: warnings,
+    warnings: [...warnings, ...extraWarnings],
   );
 }

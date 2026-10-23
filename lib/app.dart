@@ -7,6 +7,7 @@ import 'screens/bike_setup_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/safety_briefing_screen.dart';
 import 'services/app_state.dart';
+import 'services/emergency_platform.dart';
 import 'services/sensor_feed.dart';
 import 'theme/app_theme.dart';
 
@@ -17,12 +18,14 @@ class RideGuardApp extends StatelessWidget {
     required this.sync,
     required this.api,
     required this.sensors,
+    required this.emergency,
   });
 
   final AppState appState;
   final SyncService sync;
   final ApiClient api;
   final SensorSource sensors;
+  final EmergencyPlatform emergency;
 
   @override
   Widget build(BuildContext context) {
@@ -32,6 +35,7 @@ class RideGuardApp extends StatelessWidget {
         ChangeNotifierProvider.value(value: sync),
         Provider.value(value: api),
         Provider.value(value: sensors),
+        Provider.value(value: emergency),
       ],
       child: MaterialApp(
         title: 'RideGuard',

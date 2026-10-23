@@ -16,11 +16,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:ride_guard/core/calibration/calibration_session.dart';
 import 'package:ride_guard/core/fusion/motion_pipeline.dart';
+import 'package:ride_guard/core/safety/safety_monitor.dart';
+import 'package:ride_guard/core/safety/safety_tuning.dart';
 import 'package:ride_guard/data/api_client.dart';
 import 'package:ride_guard/data/outbox.dart';
 import 'package:ride_guard/data/remote_repository.dart';
 import 'package:ride_guard/data/sync_service.dart';
 import 'package:ride_guard/models/bike_profile.dart';
+import 'package:ride_guard/models/incident.dart';
 import 'package:ride_guard/models/ride_summary.dart';
 import 'package:ride_guard/services/calibration_profile_builder.dart';
 import 'package:ride_guard/services/ride_recorder.dart';
@@ -189,4 +192,132 @@ void main() {
       'cal=${profile.id} samples=${rideSummary.sampleCount}',
     );
   }, skip: _api == null ? 'set RIDEGUARD_LIVE_API to run' : false);
+
+  test('detected hazards are stored as incidents', () async {
+    final client = ApiClient(baseUrl: () => _api!);
+    final sync = SyncService(api: client, store: MemoryOutboxStore());
+    final remote = RemoteRepository(sync);
+    final riderId = uuid.v4();
+    final bike = BikeProfile(
+      id: uuid.v4(),
+      model: 'Live Test Crash',
+      ratedTopSpeedKmh: 200,
+      createdAt: DateTime.now(),
+    );
+    await remote.upsertRider(riderId);
+    await remote.upsertBike(riderId, bike);
+
+    final sim = RideSimulator(mount: Mount.handlebarPortrait);
+    final wallStart = DateTime.now().toUtc().subtract(
+      const Duration(minutes: 5),
+    );
+    var now = wallStart;
+    final recorder = RideRecorder(
+      rideId: uuid.v4(),
+      kind: RideKind.ride,
+      bikeId: bike.id,
+      remote: remote,
+      clock: () => now,
+    );
+    await recorder.start();
+
+    final p = MotionPipeline();
+    final incidents = <Incident>[];
+    final monitor = SafetyMonitor(
+      onHazard: (h) => incidents.add(
+        Incident.fromHazard(
+          id: uuid.v4(),
+          rideId: recorder.rideId,
+          hazard: h,
+          detectedAt: now,
+        ),
+      ),
+    );
+    // Raw IMU straight to the monitor, like SensorFeed does.
+    final feed = _MonitoredPipeline(p, monitor);
+    void tick(SimTick t) {
+      now = wallStart.add(t.time.difference(sim.start));
+      recorder.record(t.state);
+      monitor.update(t.state, p.mount);
+    }
+
+    sim.still(feed, 5, onTick: tick);
+    p.captureStillReference();
+    sim.accelerateTo(feed, 110, onTick: tick);
+    sim.cruise(feed, 5, onTick: tick);
+    sim.wobble(feed, 7, 3, 2, onTick: tick);
+    sim.accelerateTo(feed, 50, accel: 2, onTick: tick);
+    sim.cruise(feed, 3, onTick: tick);
+    sim.lowside(feed, onTick: tick);
+    sim.still(feed, 6, leanDeg: 85, onTick: tick);
+    expect(incidents.map((i) => i.kind), [
+      HazardKind.wobble,
+      HazardKind.impact,
+      HazardKind.crash,
+    ]);
+
+    for (final i in incidents) {
+      await remote.saveIncident(i);
+    }
+    final crash = incidents.last;
+    now = now.add(const Duration(seconds: 30));
+    await remote.saveIncident(crash.resolve(IncidentOutcome.called, now));
+    // The rider says the wobble was road buzz.
+    await remote.saveIncident(incidents.first.markedFalseAlarm());
+    final noise = monitor.takeNoise();
+    await recorder.finish(safetyStats: noise.toApiJson(SafetyTuning.defaults));
+
+    await sync.flush();
+    expect(sync.pending, 0, reason: sync.lastError);
+    expect(sync.dropped, 0, reason: sync.lastError);
+
+    final r = await http.get(
+      Uri.parse('$_api/v1/rides/${recorder.rideId}/incidents'),
+    );
+    expect(r.statusCode, 200, reason: r.body);
+    final stored = (jsonDecode(r.body) as List).cast<Map<String, dynamic>>();
+    expect(stored.map((i) => i['kind']), ['wobble', 'impact', 'crash']);
+    expect(stored[0]['wobble_hz'] as num, closeTo(7, 1));
+    expect(stored[0]['outcome'], 'warned');
+    expect(stored[0]['false_alarm'], isTrue);
+    expect(stored[0]['wobble_rms'] as num, greaterThan(1));
+    expect(stored[2]['outcome'], 'called');
+    expect(stored[2]['speed_kmh'] as num, greaterThan(20));
+    expect(stored[2]['false_alarm'], isFalse);
+
+    final ride = await get('/v1/rides/${recorder.rideId}');
+    final stats = ride['safety_stats'] as Map<String, dynamic>;
+    expect(stats['riding_s'], noise.ridingSeconds.round());
+    expect(stats['imu_hz'], 50);
+    expect(stats['wobble_threshold_rms'], SafetyTuning.defaultWobbleRms);
+  }, skip: _api == null ? 'set RIDEGUARD_LIVE_API to run' : false);
+}
+
+/// Forwards raw IMU readings to both the pipeline and the monitor.
+class _MonitoredPipeline extends MotionPipeline {
+  _MonitoredPipeline(this.inner, this.monitor);
+
+  final MotionPipeline inner;
+  final SafetyMonitor monitor;
+
+  @override
+  void addAccel(accel, double t) {
+    inner.addAccel(accel, t);
+    monitor.addAccel(accel, t);
+  }
+
+  @override
+  void addLinearAccel(accel, double t) => inner.addLinearAccel(accel, t);
+
+  @override
+  void addGyro(rate, double t, double dt) {
+    inner.addGyro(rate, t, dt);
+    monitor.addGyro(rate, t, dt);
+  }
+
+  @override
+  void addGps(GpsFix fix) => inner.addGps(fix);
+
+  @override
+  MotionState snapshot() => inner.snapshot();
 }

@@ -49,3 +49,6 @@ app.*.map.json
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Brainstorm mockups and plan workspaces
+.superpowers/

@@ -2,10 +2,15 @@ import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
 import '../config/app_config.dart';
+import '../core/safety/safety_baseline.dart';
+import '../core/safety/safety_monitor.dart';
+import '../core/safety/safety_tuning.dart';
 import '../data/local_store.dart';
 import '../data/remote_repository.dart';
 import '../models/bike_profile.dart';
 import '../models/calibration_profile.dart';
+import '../models/emergency_contact.dart';
+import '../models/incident.dart';
 import '../models/ride_summary.dart';
 
 enum StartupStep { bikeSetup, calibration, ready }
@@ -24,12 +29,25 @@ class AppState extends ChangeNotifier {
   BikeProfile? _bike;
   CalibrationProfile? _calibration;
   RideSummary? _lastRide;
+  EmergencyContact? _emergencyContact;
+  SafetyBaseline? _safetyBaseline;
   String _apiUrl = AppConfig.defaultApiUrl;
 
   String get riderId => _riderId;
   BikeProfile? get bike => _bike;
   CalibrationProfile? get calibration => _calibration;
   RideSummary? get lastRide => _lastRide;
+  EmergencyContact? get emergencyContact => _emergencyContact;
+
+  /// What has been learned about normal riding on the current mount. A new
+  /// calibration (possibly a new mount) starts over.
+  SafetyBaseline? get safetyBaseline {
+    final b = _safetyBaseline;
+    return b != null && b.calibrationId == _calibration?.id ? b : null;
+  }
+
+  SafetyTuning get safetyTuning =>
+      safetyBaseline?.tuning ?? SafetyTuning.defaults;
   String get apiUrl => _apiUrl;
   RemoteRepository get remote => _remote;
 
@@ -52,6 +70,8 @@ class AppState extends ChangeNotifier {
     _bike = _store.bike;
     _calibration = _store.calibration;
     _lastRide = _store.lastRide;
+    _emergencyContact = _store.emergencyContact;
+    _safetyBaseline = _store.safetyBaseline;
     _apiUrl = _store.apiUrl ?? AppConfig.defaultApiUrl;
     notifyListeners();
   }
@@ -92,6 +112,70 @@ class AppState extends ChangeNotifier {
   Future<void> setLastRide(RideSummary summary) async {
     _lastRide = summary;
     await _store.setLastRide(summary);
+    notifyListeners();
+  }
+
+  Future<void> saveSafetyBaseline(SafetyBaseline? baseline) async {
+    _safetyBaseline = baseline;
+    await _store.setSafetyBaseline(baseline);
+    notifyListeners();
+  }
+
+  /// Merges a finished ride's normal-riding statistics into the baseline.
+  Future<void> learnFromRide(
+    RideNoise noise, {
+    required List<Incident> incidents,
+  }) async {
+    final calibration = _calibration;
+    if (calibration == null) return;
+    final base =
+        safetyBaseline ?? SafetyBaseline(calibrationId: calibration.id);
+    await saveSafetyBaseline(
+      base.withRide(
+        noise,
+        cancelledCrashes: incidents
+            .where((i) => i.outcome == IncidentOutcome.cancelled)
+            .length,
+      ),
+    );
+  }
+
+  /// The rider says [incident] was not real: detection on this mount gets
+  /// just less sensitive than that event, and the label is uploaded.
+  Future<Incident> markFalseAlarm(Incident incident) async {
+    final marked = incident.markedFalseAlarm();
+    final calibration = _calibration;
+    if (calibration != null) {
+      final base =
+          safetyBaseline ?? SafetyBaseline(calibrationId: calibration.id);
+      final updated = switch (incident.kind) {
+        HazardKind.wobble when incident.wobbleRms != null =>
+          base.withFalseWobble(incident.wobbleRms!),
+        HazardKind.impact when incident.peakAccelG != null =>
+          base.withFalseImpact(incident.peakAccelG!),
+        HazardKind.extremeLean => base.withFalseLean(incident.leanDeg),
+        _ => base,
+      };
+      await saveSafetyBaseline(updated);
+    }
+    await _remote.saveIncident(marked);
+    return marked;
+  }
+
+  /// Back to default sensitivity; learning starts again from the next ride.
+  Future<void> resetSafetyLearning() async {
+    final calibration = _calibration;
+    await saveSafetyBaseline(
+      calibration == null
+          ? null
+          : SafetyBaseline(calibrationId: calibration.id),
+    );
+  }
+
+  /// Stays on the phone only; the backend never sees the contact.
+  Future<void> setEmergencyContact(EmergencyContact? contact) async {
+    _emergencyContact = contact;
+    await _store.setEmergencyContact(contact);
     notifyListeners();
   }
 

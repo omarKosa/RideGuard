@@ -5,9 +5,12 @@ import '../core/calibration/calibration_session.dart';
 import '../models/calibration_profile.dart';
 import '../services/app_state.dart';
 import '../services/calibration_controller.dart';
+import '../services/emergency_platform.dart';
+import '../services/safety_controller.dart';
 import '../services/sensor_feed.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
+import '../widgets/safety_overlay.dart';
 import 'home_screen.dart';
 import 'safety_briefing_screen.dart';
 
@@ -16,11 +19,22 @@ class CalibrationScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (context) => CalibrationController(
-        app: context.read<AppState>(),
-        feed: SensorFeed(context.read<SensorSource>()),
-      )..start(),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(
+          create: (context) => SafetyController(
+            app: context.read<AppState>(),
+            platform: context.read<EmergencyPlatform>(),
+          ),
+        ),
+        ChangeNotifierProvider(
+          create: (context) => CalibrationController(
+            app: context.read<AppState>(),
+            feed: SensorFeed(context.read<SensorSource>()),
+            safety: context.read<SafetyController>(),
+          )..start(),
+        ),
+      ],
       child: const _CalibrationView(),
     );
   }
@@ -73,22 +87,26 @@ class _CalibrationView extends StatelessWidget {
     return PopScope(
       canPop: !c.running,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) _confirmAbort(context);
+        final alerting =
+            context.read<SafetyController>().phase != SafetyPhase.idle;
+        if (!didPop && !alerting) _confirmAbort(context);
       },
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('INIT RIDE'),
-          automaticallyImplyLeading: !c.running,
-          actions: [
-            if (c.running)
-              TextButton.icon(
-                onPressed: () => _confirmAbort(context),
-                icon: const Icon(Icons.close, color: AppColors.textMuted),
-                label: Text('STOP', style: AppText.label(13)),
-              ),
-          ],
+      child: SafetyLayer(
+        child: Scaffold(
+          appBar: AppBar(
+            title: const Text('INIT RIDE'),
+            automaticallyImplyLeading: !c.running,
+            actions: [
+              if (c.running)
+                TextButton.icon(
+                  onPressed: () => _confirmAbort(context),
+                  icon: const Icon(Icons.close, color: AppColors.textMuted),
+                  label: Text('STOP', style: AppText.label(13)),
+                ),
+            ],
+          ),
+          body: GradientBackground(child: SafeArea(top: false, child: body)),
         ),
-        body: GradientBackground(child: SafeArea(top: false, child: body)),
       ),
     );
   }
@@ -400,6 +418,15 @@ class _ResultViewState extends State<_ResultView> {
             ('Riding direction', r.forwardFromMotion ? 'learned' : 'guessed'),
             ('Lean scale', r.params.leanGain.toStringAsFixed(2)),
           ]),
+        ),
+        const SizedBox(height: 12),
+        SectionCard(
+          title: 'SAFETY ALERTS',
+          child: SafetyLearningSummary(
+            baseline: context.read<CalibrationController>().safetyBaseline,
+            // They are part of the calibration warnings below.
+            showWarnings: false,
+          ),
         ),
         for (final w in r.warnings) ...[
           const SizedBox(height: 10),

@@ -22,4 +22,8 @@ class AppConfig {
   static const Duration imuSamplingPeriod = Duration(milliseconds: 20);
   static const int uploadBatchSize = 100;
   static const Duration uploadInterval = Duration(seconds: 5);
+
+  /// Time the rider has to cancel after a crash before the emergency contact
+  /// is called.
+  static const Duration crashCountdown = Duration(seconds: 30);
 }

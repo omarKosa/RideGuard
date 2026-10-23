@@ -5,6 +5,8 @@ import 'package:uuid/uuid.dart';
 
 import '../core/analysis/ride_analyzer.dart';
 import '../core/fusion/motion_pipeline.dart';
+import '../core/safety/safety_monitor.dart';
+import '../core/safety/safety_tuning.dart';
 import '../models/brake_event.dart';
 import '../models/calibration_profile.dart';
 import '../models/ride_sample.dart';
@@ -12,6 +14,7 @@ import '../models/ride_summary.dart';
 import 'app_state.dart';
 import 'keep_awake.dart';
 import 'ride_recorder.dart';
+import 'safety_controller.dart';
 import 'sensor_feed.dart';
 
 /// A regular ride using the saved calibration.
@@ -19,10 +22,12 @@ class RideController extends ChangeNotifier {
   RideController({
     required AppState app,
     required SensorFeed feed,
+    SafetyController? safety,
     DateTime Function()? clock,
     KeepAwake? keepAwake,
   }) : _app = app,
        _feed = feed,
+       _safety = safety,
        _clock = clock ?? DateTime.now,
        _keepAwake = keepAwake ?? keepScreenAwake;
 
@@ -31,11 +36,14 @@ class RideController extends ChangeNotifier {
 
   final AppState _app;
   final SensorFeed _feed;
+  final SafetyController? _safety;
   final DateTime Function() _clock;
   final KeepAwake _keepAwake;
   static const _uuid = Uuid();
 
   RideRecorder? _recorder;
+  SafetyMonitor? _monitor;
+  SafetyTuning _tuning = SafetyTuning.defaults;
   CalibrationProfile? _calibration;
   MotionState? _state;
   RideStats _window = const RideStats();
@@ -47,6 +55,9 @@ class RideController extends ChangeNotifier {
   int _ticks = 0;
 
   bool get riding => _riding;
+
+  /// Thresholds in use on this ride, learned from earlier rides.
+  SafetyTuning get tuning => _tuning;
   MotionState? get state => _state;
   RideStats get window => _window;
   RideStats get totals => _totals;
@@ -90,7 +101,16 @@ class RideController extends ChangeNotifier {
     _riding = true;
     // Best effort; never delay recording on a plugin call.
     unawaited(_keepAwake(true));
-    await _feed.start(MotionPipeline(params: calibration.params), _onTick);
+    final safety = _safety?..begin(recorder.rideId);
+    _tuning = _app.safetyTuning;
+    _monitor = safety == null
+        ? null
+        : SafetyMonitor.tuned(_tuning, onHazard: safety.report);
+    await _feed.start(
+      MotionPipeline(params: calibration.params),
+      _onTick,
+      safety: _monitor,
+    );
     _notify();
   }
 
@@ -118,8 +138,16 @@ class RideController extends ChangeNotifier {
     if (!_riding || recorder == null) return null;
     _riding = false;
     await _feed.stop();
+    _safety?.end();
     unawaited(_keepAwake(false));
-    final summary = await recorder.finish();
+    // Every ride teaches the app what normal riding looks like here.
+    final noise = _monitor?.takeNoise();
+    if (noise != null) {
+      await _app.learnFromRide(noise, incidents: _safety?.incidents ?? []);
+    }
+    final summary = await recorder.finish(
+      safetyStats: noise?.toApiJson(_tuning),
+    );
     await _app.setLastRide(summary);
     _notify();
     return summary;
@@ -135,6 +163,7 @@ class RideController extends ChangeNotifier {
     if (_riding) {
       _riding = false;
       _feed.stop();
+      _safety?.end();
       unawaited(_keepAwake(false));
       _recorder?.finish(status: RideStatus.aborted);
     }

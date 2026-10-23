@@ -24,7 +24,7 @@ RIDE_COLUMNS = """
     r.reported_sample_count, r.max_speed_kmh, r.max_lean_left_deg,
     r.max_lean_right_deg, r.max_stop_time_s, r.best_decel_mps2,
     r.brake_event_count, r.distance_m, r.moving_time_s,
-    r.avg_moving_speed_kmh, r.window_stats
+    r.avg_moving_speed_kmh, r.window_stats, r.safety_stats
 """
 
 # Phone and server clocks differ; allow this much slack on timestamps.
@@ -146,7 +146,7 @@ async def finish_ride(ride_id: UUID, body: RideSummaryIn, conn: Conn):
                 best_decel_mps2 = $11, brake_event_count = $12,
                 distance_m = $13, moving_time_s = $14,
                 avg_moving_speed_kmh = $15, window_stats = $16,
-                updated_at = now()
+                safety_stats = $17, updated_at = now()
             WHERE id = $1
             """,
             ride_id,
@@ -165,6 +165,7 @@ async def finish_ride(ride_id: UUID, body: RideSummaryIn, conn: Conn):
             t.moving_time_s,
             t.avg_moving_speed_kmh,
             body.window.model_dump(),
+            body.safety_stats.model_dump() if body.safety_stats else None,
         )
         # Replace, so a retried summary leaves exactly one copy.
         await conn.execute("DELETE FROM brake_events WHERE ride_id = $1", ride_id)

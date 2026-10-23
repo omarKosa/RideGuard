@@ -1,14 +1,25 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../core/analysis/ride_analyzer.dart';
+import '../models/incident.dart';
 import '../models/ride_summary.dart';
+import '../services/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
+import '../widgets/safety_overlay.dart';
 
 class RideSummaryScreen extends StatelessWidget {
-  const RideSummaryScreen({super.key, required this.summary});
+  const RideSummaryScreen({
+    super.key,
+    required this.summary,
+    this.incidents = const [],
+  });
 
   final RideSummary summary;
+
+  /// Hazards detected on this ride.
+  final List<Incident> incidents;
 
   @override
   Widget build(BuildContext context) {
@@ -70,6 +81,10 @@ class RideSummaryScreen extends StatelessWidget {
                         ],
                       ),
               ),
+              if (incidents.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                _IncidentsCard(incidents: incidents),
+              ],
               if (summary.mountRealignments > 0) ...[
                 const SizedBox(height: 12),
                 WarningBanner(
@@ -150,4 +165,92 @@ class _StatsCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// What was detected on the ride. Warnings the rider marks as not real
+/// make detection on this mount slightly less sensitive.
+class _IncidentsCard extends StatefulWidget {
+  const _IncidentsCard({required this.incidents});
+
+  final List<Incident> incidents;
+
+  @override
+  State<_IncidentsCard> createState() => _IncidentsCardState();
+}
+
+class _IncidentsCardState extends State<_IncidentsCard> {
+  late final List<Incident> _incidents = List.of(widget.incidents);
+
+  Future<void> _markFalse(int i) async {
+    final marked = await context.read<AppState>().markFalseAlarm(_incidents[i]);
+    if (mounted) setState(() => _incidents[i] = marked);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SectionCard(
+      title: 'SAFETY ALERTS (${_incidents.length})',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Mark warnings that were not real; the app learns from it. '
+            'Crashes are never loosened this way.',
+            style: AppText.body(13, color: AppColors.textMuted),
+          ),
+          for (final (i, incident) in _incidents.indexed)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Row(
+                children: [
+                  Icon(
+                    incident.kind.critical
+                        ? Icons.car_crash
+                        : Icons.report_problem,
+                    color: incident.kind.critical
+                        ? AppColors.red
+                        : AppColors.amber,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      incident.kind.critical
+                          ? 'Crash at '
+                                '${incident.speedKmh.toStringAsFixed(0)} km/h '
+                                '- ${_outcomeText(incident.outcome)}'
+                          : describeWarning(incident).split('. ').first,
+                      style: AppText.body(15),
+                    ),
+                  ),
+                  if (!incident.kind.critical)
+                    incident.falseAlarm
+                        ? Text(
+                            'NOT REAL',
+                            style: AppText.label(
+                              12,
+                              color: AppColors.textFaint,
+                            ),
+                          )
+                        : TextButton(
+                            key: Key('false-alarm-$i'),
+                            onPressed: () => _markFalse(i),
+                            child: const Text('NOT REAL'),
+                          ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  static String _outcomeText(IncidentOutcome o) => switch (o) {
+    IncidentOutcome.cancelled => 'you cancelled',
+    IncidentOutcome.called => 'contact called',
+    IncidentOutcome.dialerOpened => 'dialer opened',
+    IncidentOutcome.callFailed => 'call failed',
+    IncidentOutcome.noContact => 'no contact set',
+    IncidentOutcome.pending || IncidentOutcome.warned => 'pending',
+  };
 }

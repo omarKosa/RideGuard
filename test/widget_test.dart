@@ -23,6 +23,7 @@ Future<(AppState, Widget, RecordingBackend)> buildApp() async {
     sync: stack.sync,
     api: ApiClient(baseUrl: () => 'http://x', client: stack.backend.client),
     sensors: FakeSensorSource(),
+    emergency: FakeEmergencyPlatform(),
   );
   return (app, widget, stack.backend);
 }
