@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'app.dart';
 import 'data/api_client.dart';
+import 'data/bike_catalogue.dart';
 import 'data/local_store.dart';
 import 'data/outbox.dart';
 import 'data/remote_repository.dart';
@@ -26,6 +27,7 @@ Future<void> main() async {
   );
 
   final store = await LocalStore.open();
+  final catalogue = await BikeCatalogue.load(rootBundle);
   final docs = await getApplicationDocumentsDirectory();
 
   // The API URL lives in AppState (editable in Settings); the client reads
@@ -39,6 +41,7 @@ Future<void> main() async {
   appState = AppState(
     store: store,
     remote: RemoteRepository(sync),
+    catalogue: catalogue,
     phoneInfo: readPhoneInfo,
   );
   await appState.load();

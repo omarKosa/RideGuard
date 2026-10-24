@@ -9,6 +9,7 @@ import 'package:ride_guard/core/fusion/mount_orientation.dart';
 import 'package:ride_guard/core/math/vec3.dart';
 import 'package:ride_guard/data/api_client.dart';
 import 'package:ride_guard/data/local_store.dart';
+import 'package:ride_guard/models/bike_choice.dart';
 import 'package:ride_guard/models/calibration_profile.dart';
 import 'package:ride_guard/screens/safety_briefing_screen.dart';
 import 'package:ride_guard/services/app_state.dart';
@@ -18,7 +19,11 @@ import 'support/fakes.dart';
 
 Future<(AppState, Widget, RecordingBackend)> buildApp() async {
   final stack = offlineFirstStack();
-  final app = AppState(store: await LocalStore.open(), remote: stack.remote);
+  final app = AppState(
+    store: await LocalStore.open(),
+    remote: stack.remote,
+    catalogue: realCatalogue(),
+  );
   await app.load();
   final widget = RideGuardApp(
     appState: app,
@@ -103,8 +108,7 @@ void main() {
     addTearDown(tester.view.reset);
     final (app, _, _) = await buildApp();
     final bike = await app.saveBike(
-      model: 'Ducati Monster',
-      ratedTopSpeedKmh: 230,
+      const OtherChoice(make: 'Ducati', model: 'Monster', topSpeedKmh: 230),
     );
     await app.saveCalibration(
       CalibrationProfile(

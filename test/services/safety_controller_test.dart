@@ -32,7 +32,11 @@ typedef _Rig = ({
 Future<_Rig> _rig({EmergencyContact? contact = _contact}) async {
   SharedPreferences.setMockInitialValues({});
   final stack = offlineFirstStack();
-  final app = AppState(store: await LocalStore.open(), remote: stack.remote);
+  final app = AppState(
+    store: await LocalStore.open(),
+    remote: stack.remote,
+    catalogue: realCatalogue(),
+  );
   await app.load();
   await app.setEmergencyContact(contact);
   final platform = FakeEmergencyPlatform();

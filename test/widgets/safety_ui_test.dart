@@ -40,7 +40,11 @@ void main() {
 
   Future<(AppState, SyncService, FakeEmergencyPlatform)> deps() async {
     final stack = offlineFirstStack();
-    final app = AppState(store: await LocalStore.open(), remote: stack.remote);
+    final app = AppState(
+      store: await LocalStore.open(),
+      remote: stack.remote,
+      catalogue: realCatalogue(),
+    );
     await app.load();
     return (app, stack.sync, FakeEmergencyPlatform());
   }
@@ -143,7 +147,11 @@ void main() {
     tester.view.devicePixelRatio = 2;
     addTearDown(tester.view.reset);
     final stack = offlineFirstStack();
-    final app = AppState(store: await LocalStore.open(), remote: stack.remote);
+    final app = AppState(
+      store: await LocalStore.open(),
+      remote: stack.remote,
+      catalogue: realCatalogue(),
+    );
     await app.load();
     await app.saveCalibration(
       CalibrationProfile(

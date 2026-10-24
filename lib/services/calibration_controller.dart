@@ -4,12 +4,14 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
 
+import '../core/analysis/performance_meter.dart';
 import '../core/calibration/calibration_session.dart';
 import '../core/fusion/motion_pipeline.dart';
 import '../core/safety/safety_baseline.dart';
 import '../core/safety/safety_monitor.dart';
 import '../core/safety/safety_tuning.dart';
 import '../models/calibration_profile.dart';
+import '../models/model_check.dart';
 import '../models/ride_summary.dart';
 import 'app_state.dart';
 import 'calibration_profile_builder.dart';
@@ -49,6 +51,8 @@ class CalibrationController extends ChangeNotifier {
   SafetyMonitor? _monitor;
   RideNoise? _noise;
   SafetyBaseline? _safetyBaseline;
+  PerformanceMeter? _meter;
+  InitReadings? _initReadings;
   MotionState? _state;
   CalibrationProfile? _result;
   CalibrationTask? _lastTask;
@@ -63,6 +67,10 @@ class CalibrationController extends ChangeNotifier {
   /// What the init ride learned about normal riding on this mount; saved
   /// with the calibration.
   SafetyBaseline? get safetyBaseline => _safetyBaseline;
+
+  /// What the init ride measured (top speed, acceleration, stops); checked
+  /// against the bike's model when the result is accepted.
+  InitReadings? get initReadings => _initReadings;
   CalibrationPhase get phase => _phase;
 
   /// Sensors are live (starting up or recording).
@@ -84,6 +92,8 @@ class CalibrationController extends ChangeNotifier {
     );
     _lastTask = _session!.current;
     _result = null;
+    _meter = PerformanceMeter();
+    _initReadings = null;
     _recorder = RideRecorder(
       rideId: _uuid.v4(),
       kind: RideKind.calibration,
@@ -122,7 +132,9 @@ class CalibrationController extends ChangeNotifier {
     final session = _session;
     if (session == null || _phase != CalibrationPhase.running) return;
     _state = s;
-    _recorder?.record(s);
+    _meter?.add(s);
+    final stop = _recorder?.record(s);
+    if (stop != null) _meter?.addStop(stop);
     session.update(s, _clock());
     _afterUpdate();
   }
@@ -144,7 +156,16 @@ class CalibrationController extends ChangeNotifier {
 
   Future<void> _complete() async {
     final summary = await _stop(RideStatus.completed);
-    _result = _buildProfile(summary);
+    final result = _result = _buildProfile(summary);
+    final meter = _meter;
+    _initReadings = result == null || meter == null
+        ? null
+        : InitReadings(
+            calibrationId: result.id,
+            rideId: result.rideId,
+            readings: meter.readings,
+            imuHz: _noise?.imuHz,
+          );
     _phase = CalibrationPhase.finished;
     _finishing = false;
     _notify();
@@ -162,7 +183,9 @@ class CalibrationController extends ChangeNotifier {
   }
 
   /// Saves the result as the active calibration, with what was learned
-  /// about this mount's vibration.
+  /// about this mount's vibration, then checks the init ride's readings
+  /// against the bike's model (the calibration is queued first: the check
+  /// refers to it).
   Future<void> accept() async {
     final result = _result;
     if (result == null) return;
@@ -170,6 +193,8 @@ class CalibrationController extends ChangeNotifier {
     await _app.saveSafetyBaseline(
       _safetyBaseline ?? SafetyBaseline(calibrationId: result.id),
     );
+    final readings = _initReadings;
+    if (readings != null) await _app.recordInitRide(result, readings);
   }
 
   CalibrationProfile? _buildProfile(RideSummary? summary) {

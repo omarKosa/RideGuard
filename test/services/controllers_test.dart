@@ -4,10 +4,13 @@ import 'package:ride_guard/core/fusion/motion_pipeline.dart';
 import 'package:ride_guard/core/fusion/mount_orientation.dart';
 import 'package:ride_guard/core/safety/safety_monitor.dart';
 import 'package:ride_guard/data/local_store.dart';
+import 'package:ride_guard/models/bike_choice.dart';
+import 'package:ride_guard/models/bike_profile.dart';
 import 'package:ride_guard/models/calibration_profile.dart';
 import 'package:ride_guard/models/emergency_contact.dart';
 import 'package:ride_guard/services/app_state.dart';
 import 'package:ride_guard/services/calibration_controller.dart';
+import 'package:ride_guard/services/phone_info.dart';
 import 'package:ride_guard/services/ride_controller.dart';
 import 'package:ride_guard/services/safety_controller.dart';
 import 'package:ride_guard/services/sensor_feed.dart';
@@ -64,9 +67,12 @@ void main() {
       final app = AppState(
         store: await LocalStore.open(),
         remote: stack.remote,
+        catalogue: realCatalogue(),
       );
       await app.load();
-      await app.saveBike(model: 'KTM 390 Duke', ratedTopSpeedKmh: 165);
+      await app.saveBike(
+        const OtherChoice(make: 'KTM', model: '390 Duke', topSpeedKmh: 165),
+      );
 
       final source = FakeSensorSource();
       final mount = Mount.euler(70, 35, -110); // phone in an odd holder
@@ -161,16 +167,104 @@ void main() {
     },
   );
 
+  testWidgets('init ride with a catalogue bike uploads a model check', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final stack = offlineFirstStack();
+    final catalogue = realCatalogue();
+    final app = AppState(
+      store: await LocalStore.open(),
+      remote: stack.remote,
+      catalogue: catalogue,
+      phoneInfo: () async => const PhoneInfo(model: 'Pixel 9'),
+    );
+    await app.load();
+    final gsx = catalogue.byId('suzuki-gsx-s1000-2021')!;
+    final bike = await app.saveBike(
+      CatalogueChoice(model: gsx, riderTopSpeedKmh: 250),
+    );
+    expect(bike.catalogueModelId, gsx.id);
+
+    final source = FakeSensorSource();
+    final mount = Mount.euler(70, 35, -110);
+    final pipe = _SourcePipe(source);
+    final cal = CalibrationController(
+      app: app,
+      feed: SensorFeed(source, clock: () => pipe.t),
+      safety: SafetyController(app: app, platform: FakeEmergencyPlatform()),
+      keepAwake: (_) async {},
+    );
+    await tester.runAsync(cal.start);
+    final sim = RideSimulator(mount: mount);
+    Future<void> drive(void Function() segment) async {
+      segment();
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 150)),
+      );
+    }
+
+    for (var i = 0; i < 6; i++) {
+      await drive(() => sim.still(pipe, 1));
+    }
+    await drive(() => sim.accelerateTo(pipe, 90));
+    for (var i = 0; i < 4; i++) {
+      await drive(() => sim.cruise(pipe, 1));
+    }
+    await tester.runAsync(() async {
+      while (cal.phase == CalibrationPhase.running) {
+        cal.skip();
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    });
+    expect(cal.phase, CalibrationPhase.finished);
+    final result = cal.result!;
+    await tester.runAsync(cal.accept);
+    cal.dispose();
+    await tester.runAsync(stack.sync.flush);
+
+    final paths = stack.backend.requests.map((r) => r.url.path).toList();
+    final calAt = paths.indexOf('/v1/calibrations/${result.id}');
+    final checkAt = paths.indexWhere(
+      (p) => p.startsWith('/v1/bikes/${bike.id}/model-checks/'),
+    );
+    expect(calAt, greaterThanOrEqualTo(0));
+    expect(checkAt, greaterThan(calAt));
+    final check = stack.backend
+        .bodiesFor('PUT', '/v1/bikes/${bike.id}/model-checks/')
+        .single;
+    expect(check['reason'], 'init_ride');
+    expect(check['calibration_id'], result.id);
+    expect(check['ride_id'], result.rideId);
+    expect(check['catalogue_model_id'], gsx.id);
+    expect(check['catalogue_version'], catalogue.version);
+    expect(check['other_model'], isNull);
+    expect(check['phone_model'], 'Pixel 9');
+    expect(check['imu_hz'], isNotNull);
+    expect(check['expected'], isNotNull);
+    expect(check['measured']['sustained_top_speed_kmh'], isNotNull);
+    expect(check['results']['top_speed'], 'not_tested');
+    expect(check['mismatch'], isFalse);
+    // Nothing impossible: the rider's top speed stands.
+    expect(app.bike!.ratedTopSpeedKmh, 250);
+    expect(app.bike!.topSpeedSource, TopSpeedSource.rider);
+    expect(app.initReadings!.calibrationId, result.id);
+  });
+
   testWidgets('a crash mid-ride sounds the alarm and calls the contact', (
     tester,
   ) async {
     SharedPreferences.setMockInitialValues({});
     final stack = offlineFirstStack();
-    final app = AppState(store: await LocalStore.open(), remote: stack.remote);
+    final app = AppState(
+      store: await LocalStore.open(),
+      remote: stack.remote,
+      catalogue: realCatalogue(),
+    );
     await app.load();
     final bike = await app.saveBike(
-      model: 'KTM 390 Duke',
-      ratedTopSpeedKmh: 165,
+      const OtherChoice(make: 'KTM', model: '390 Duke', topSpeedKmh: 165),
     );
     final mount = Mount.euler(70, 35, -110);
     await app.saveCalibration(

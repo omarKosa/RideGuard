@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:ride_guard/core/math/vec3.dart';
 import 'package:ride_guard/data/api_client.dart';
+import 'package:ride_guard/data/bike_catalogue.dart';
 import 'package:ride_guard/data/outbox.dart';
 import 'package:ride_guard/data/remote_repository.dart';
 import 'package:ride_guard/data/sync_service.dart';
@@ -107,3 +109,10 @@ offlineFirstStack({OutboxStore? store}) {
   );
   return (sync: sync, remote: RemoteRepository(sync), backend: backend);
 }
+
+BikeCatalogue? _catalogue;
+
+/// The bundled catalogue, read from the repo (tests run from its root).
+BikeCatalogue realCatalogue() => _catalogue ??= BikeCatalogue.parse(
+  File(BikeCatalogue.assetPath).readAsStringSync(),
+);

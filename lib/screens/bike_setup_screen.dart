@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../models/bike_choice.dart';
 import '../models/bike_profile.dart';
 import '../services/app_state.dart';
 import '../theme/app_theme.dart';
@@ -64,9 +65,14 @@ class _BikeSetupScreenState extends State<BikeSetupScreen> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
     final app = context.read<AppState>();
+    // Until the catalogue picker lands, the typed text is an "Other" bike
+    // with no separate make.
     await app.saveBike(
-      model: _model.text,
-      ratedTopSpeedKmh: double.parse(_topSpeed.text.trim()),
+      OtherChoice(
+        make: '',
+        model: _model.text,
+        topSpeedKmh: double.parse(_topSpeed.text.trim()),
+      ),
     );
     if (!mounted) return;
     setState(() => _saving = false);
