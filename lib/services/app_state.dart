@@ -101,7 +101,31 @@ class AppState extends ChangeNotifier {
     } catch (_) {
       _phone = PhoneInfo.unknown;
     }
+    await _syncExisting(legacyBike: _store.bikeIsLegacy);
     notifyListeners();
+  }
+
+  /// Brings the server up to date for a rider who already has a bike:
+  /// a changed (or never sent) phone model/OS, and a bike stored before
+  /// the catalogue, which is re-saved in the new format and sent once as
+  /// an Other bike. A new rider gets both from [saveBike].
+  Future<void> _syncExisting({required bool legacyBike}) async {
+    final bike = _bike;
+    if (bike == null) return;
+    final phone = _phone;
+    final sent = _store.sentPhone;
+    final known = phone.model != null || phone.osVersion != null;
+    if (known &&
+        (sent == null ||
+            sent.model != phone.model ||
+            sent.osVersion != phone.osVersion)) {
+      await _remote.upsertRider(_riderId, phone);
+      await _store.setSentPhone(phone);
+    }
+    if (legacyBike) {
+      await _store.setBike(bike);
+      await _remote.upsertBike(_riderId, bike);
+    }
   }
 
   /// Creates or updates the bike.
@@ -143,6 +167,7 @@ class AppState extends ChangeNotifier {
     _bike = bike;
     await _store.setBike(bike);
     await _remote.upsertRider(_riderId, _phone);
+    await _store.setSentPhone(_phone);
     await _remote.upsertBike(_riderId, bike);
     final readings = initReadings;
     if (modelChanged && readings != null) {

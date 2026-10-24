@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ride_guard/core/analysis/performance_meter.dart';
 import 'package:ride_guard/core/fusion/motion_pipeline.dart';
@@ -310,4 +312,73 @@ void main() {
       expect(checks(bike.id).single['catalogue_version'], 'test.2');
     },
   );
+
+  test('an existing rider sends the phone and the legacy bike once', () async {
+    // Stored by the app before the catalogue: no phone was ever sent and
+    // the bike is free text.
+    final legacy = BikeProfile(
+      id: 'b0000000-0000-4000-8000-000000000001',
+      model: 'Honda CBR 650R',
+      ratedTopSpeedKmh: 220,
+      createdAt: DateTime.utc(2026, 1, 2),
+    );
+    SharedPreferences.setMockInitialValues({
+      'rider_id': 'r0000000-0000-4000-8000-000000000001',
+      'bike': jsonEncode({
+        'id': legacy.id,
+        'model': legacy.model,
+        'rated_top_speed_kmh': 220,
+        'created_at': '2026-01-02T00:00:00.000Z',
+      }),
+      'calibration': jsonEncode(_calibrationFor(legacy).toJson()),
+    });
+    stack = offlineFirstStack();
+    app = await open();
+    await stack.sync.flush();
+
+    expect(app.bike!.isOther, isTrue);
+    expect(app.startupStep, StartupStep.ready);
+    final bikes = stack.backend.bodiesFor('PUT', '/v1/bikes/${legacy.id}');
+    expect(bikes, hasLength(1));
+    expect(bikes.single['other_model'], 'Honda CBR 650R');
+    expect(bikes.single['catalogue_model_id'], isNull);
+    expect(bikes.single['top_speed_source'], 'rider');
+    final riders = stack.backend.bodiesFor(
+      'PUT',
+      '/v1/riders/r0000000-0000-4000-8000-000000000001',
+    );
+    expect(riders, hasLength(1));
+    expect(riders.single['phone_model'], 'Pixel 9');
+    expect(riders.single['os_version'], 'Android 16');
+
+    // Next start, same phone: nothing new to send.
+    app = await open();
+    await stack.sync.flush();
+    expect(stack.backend.bodiesFor('PUT', '/v1/riders/'), hasLength(1));
+    expect(stack.backend.bodiesFor('PUT', '/v1/bikes/'), hasLength(1));
+    expect(app.calibration, isNotNull);
+
+    // A new phone (or OS update) is sent once.
+    final updated = AppState(
+      store: await LocalStore.open(),
+      remote: stack.remote,
+      catalogue: _catalogue,
+      phoneInfo: () async =>
+          const PhoneInfo(model: 'Pixel 10', osVersion: 'Android 17'),
+    );
+    await updated.load();
+    await stack.sync.flush();
+    final after = stack.backend.bodiesFor('PUT', '/v1/riders/');
+    expect(after, hasLength(2));
+    expect(after.last['phone_model'], 'Pixel 10');
+  });
+
+  test('saving a bike records the phone as sent', () async {
+    await app.saveBike(
+      const OtherChoice(make: 'Vespa', model: 'GTS 300', topSpeedKmh: 90),
+    );
+    app = await open();
+    await stack.sync.flush();
+    expect(stack.backend.bodiesFor('PUT', '/v1/riders/'), hasLength(1));
+  });
 }

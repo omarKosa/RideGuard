@@ -8,6 +8,7 @@ import '../models/calibration_profile.dart';
 import '../models/emergency_contact.dart';
 import '../models/model_check.dart';
 import '../models/ride_summary.dart';
+import '../services/phone_info.dart';
 
 /// Small on-device key-value persistence for profile and settings.
 class LocalStore {
@@ -26,12 +27,28 @@ class LocalStore {
   static const _emergencyContact = 'emergency_contact';
   static const _safetyBaseline = 'safety_baseline';
   static const _initReadings = 'init_readings';
+  static const _sentPhone = 'sent_phone';
 
   String? get riderId => _prefs.getString(_riderId);
   Future<void> setRiderId(String id) => _prefs.setString(_riderId, id);
 
   BikeProfile? get bike => _read(_bike, BikeProfile.fromJson);
   Future<void> setBike(BikeProfile bike) => _write(_bike, bike.toJson());
+
+  /// The stored bike was saved by the app before the catalogue (so the
+  /// server has never seen it as an Other bike).
+  bool get bikeIsLegacy => _read(_bike, BikeProfile.isLegacyJson) ?? false;
+
+  /// The phone model and OS last sent with the rider record.
+  PhoneInfo? get sentPhone => _read(
+    _sentPhone,
+    (j) => PhoneInfo(
+      model: j['model'] as String?,
+      osVersion: j['os_version'] as String?,
+    ),
+  );
+  Future<void> setSentPhone(PhoneInfo p) =>
+      _write(_sentPhone, {'model': p.model, 'os_version': p.osVersion});
 
   CalibrationProfile? get calibration =>
       _read(_calibration, CalibrationProfile.fromJson);

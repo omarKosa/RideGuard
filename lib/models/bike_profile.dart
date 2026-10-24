@@ -15,9 +15,13 @@ class BikeProfile {
     this.topSpeedSource = TopSpeedSource.rider,
   });
 
+  /// Stored by the app before the catalogue: free text, no source.
+  static bool isLegacyJson(Map<String, dynamic> json) =>
+      !json.containsKey('top_speed_source');
+
   factory BikeProfile.fromJson(Map<String, dynamic> json) {
     final model = json['model'] as String;
-    final legacy = !json.containsKey('top_speed_source');
+    final legacy = isLegacyJson(json);
     return BikeProfile(
       id: json['id'] as String,
       model: model,
