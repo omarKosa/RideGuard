@@ -23,6 +23,26 @@ def test_catalogue_file_is_valid():
     assert all(re.fullmatch(r"[a-z0-9-]+", i) for i in ids)
 
 
+# Press and spec sites: a figure taken from them is never "official".
+THIRD_PARTY_HOSTS = {
+    "www.motorradonline.de", "www.1000ps.com", "www.motoplanete.com",
+    "www.moto.it", "en.wikipedia.org",
+}
+
+
+def test_third_party_sources_are_not_official():
+    bad = []
+    for m in load_catalogue().models:
+        for field in ("displacement_cc", "power_kw", "weight_kg",
+                      "top_speed_kmh", "zero_to_100_s"):
+            spec = getattr(m, field)
+            if spec is None or spec.quality != "official":
+                continue
+            if spec.source.host in THIRD_PARTY_HOSTS:
+                bad.append(f"{m.id}.{field}")
+    assert bad == []
+
+
 def test_target_models_present():
     by_id = {m.id: m for m in load_catalogue().models}
     assert "suzuki-gsx-s1000-2015" in by_id
