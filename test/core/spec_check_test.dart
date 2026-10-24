@@ -127,9 +127,7 @@ void main() {
     final cat = realCatalogue();
     final small = [
       for (final make in cat.makes)
-        ...cat
-            .modelsFor(make)
-            .where((m) => (m.displacementCc?.value ?? 999) <= 125),
+        ...cat.modelsFor(make).where((m) => m.displacementCc.value <= 125),
     ];
     expect(small, isNotEmpty);
     for (final m in small) {
