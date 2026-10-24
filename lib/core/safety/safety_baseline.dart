@@ -105,7 +105,8 @@ class BandNoise {
   /// Strongest wobble-band oscillation in each second.
   final Histogram wobbleRms;
 
-  /// Oscillation frequency (Hz) at each second's strongest rotation.
+  /// Frequency (Hz) of each second's strongest wobble-band shake (the
+  /// same sample as [wobbleRms]); seconds without any are left out.
   final Histogram wobbleHz;
 
   /// Strongest jolt in each second.
@@ -113,9 +114,9 @@ class BandNoise {
 
   double get seconds => wobbleRms.total;
 
-  void add({required double wobble, required double hz, required double g}) {
+  void add({required double wobble, required double? hz, required double g}) {
     wobbleRms.add(wobble);
-    wobbleHz.add(hz);
+    if (hz != null) wobbleHz.add(hz);
     peakG.add(g);
   }
 }

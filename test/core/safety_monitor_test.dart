@@ -3,17 +3,22 @@ import 'package:ride_guard/core/fusion/motion_pipeline.dart';
 import 'package:ride_guard/core/math/vec3.dart';
 import 'package:ride_guard/core/safety/motion_clip.dart';
 import 'package:ride_guard/core/safety/safety_monitor.dart';
+import 'package:ride_guard/core/safety/safety_tuning.dart';
 
 import '../support/ride_simulator.dart';
 
 /// A pipeline that also feeds a [SafetyMonitor] the way SensorFeed does:
 /// raw IMU at full rate, processed state at 10 Hz.
 class _Monitored extends MotionPipeline {
+  _Monitored({this.impactG = SafetyTuning.defaultImpactG});
+
+  final double impactG;
   final hazards = <Hazard>[];
   final clips = <(Hazard, MotionClip)>[];
   late final monitor = SafetyMonitor(
     onHazard: hazards.add,
     onClip: (h, c) => clips.add((h, c)),
+    impactG: impactG,
   );
   double _nextUpdate = 0;
 
@@ -191,6 +196,81 @@ void main() {
     // Delivered once.
     p.monitor.takeNoise();
     expect(p.clips, hasLength(1));
+  });
+
+  /// The row of [rows] with the largest magnitude.
+  List<double> peak(List<List<double>> rows) => rows.reduce(
+    (a, b) =>
+        Vec3.fromList(b.sublist(1)).length > Vec3.fromList(a.sublist(1)).length
+        ? b
+        : a,
+  );
+
+  test("an impact crash's clip is centred on the impact", () {
+    final (p, sim) = _rideAt(60, Mount.handlebarPortrait);
+    sim.impact(p, g: 8);
+    sim.brakeToStop(p, decel: 12);
+    sim.still(p, 8);
+    expect(p.kinds, [HazardKind.impact, HazardKind.crash]);
+    final crash = p.hazards.last;
+    // Confirmed only once the bike had stayed stopped, seconds later...
+    final clip = p.clips.singleWhere((c) => identical(c.$1, crash)).$2;
+    // ...but the clip is around the impact itself, and complete.
+    expect(peak(clip.accel)[0], closeTo(0, 0.3));
+    expect(
+      Vec3.fromList(peak(clip.accel).sublist(1)).length / 9.81,
+      greaterThan(7),
+    );
+    expect(clip.startOffsetS, -5);
+    expect(clip.accel.first[0], closeTo(-5, 0.05));
+    expect(clip.accel.last[0], closeTo(5, 0.05));
+    expect(clip.accel.length, inInclusiveRange(490, 510));
+
+    // Warnings keep their clip around the report.
+    final impactClip = p.clips
+        .singleWhere((c) => c.$1.kind == HazardKind.impact)
+        .$2;
+    expect(peak(impactClip.accel)[0], inInclusiveRange(-0.5, 0));
+  });
+
+  test("a bike-down crash's clip is centred on the bike going down", () {
+    // No impact path: only lying on its side makes this a crash.
+    final p = _Monitored(impactG: 50);
+    final sim = RideSimulator(mount: Mount.handlebarPortrait);
+    sim.still(p, 5);
+    p.captureStillReference();
+    sim.accelerateTo(p, 50);
+    sim.cruise(p, 5);
+    sim.lowside(p);
+    sim.still(p, 6, leanDeg: 85);
+    expect(p.kinds, [HazardKind.crash]);
+    final (_, clip) = p.clips.single;
+    // Confirmed 3 s after it went down; t = 0 is the moment the tilt says
+    // "on its side" (a filtered reading, a little after the fall starts).
+    final fallStart = clip.gyro.firstWhere(
+      (r) => Vec3.fromList(r.sublist(1)).length > 1.5,
+    );
+    expect(fallStart[0], inInclusiveRange(-1.5, 0));
+    expect(peak(clip.accel)[0], inInclusiveRange(-1, 0)); // hits the ground
+    expect(clip.startOffsetS, -5);
+    expect(clip.accel.last[0], closeTo(5, 0.05));
+  });
+
+  test('a crash long after its event is clamped to what the buffer holds', () {
+    final rec = ClipRecorder(lookback: 16);
+    final done = <(Hazard, MotionClip)>[];
+    const h = Hazard(kind: HazardKind.crash, t: 60, speedKmh: 0, leanDeg: 0);
+    for (var i = 0; i <= 70 * 50; i++) {
+      final t = i / 50;
+      rec.addAccel(const Vec3(0, 0, 9.81), t);
+      rec.addGyro(Vec3.zero, t);
+      if (i == 60 * 50) rec.capture(h, at: 20); // 40 s earlier
+      done.addAll(rec.poll(t));
+    }
+    final clip = done.single.$2;
+    expect(clip.startOffsetS, -5);
+    expect(clip.accel.first[0], closeTo(-5, 0.03));
+    expect(clip.accel.last[0], closeTo(5, 0.03));
   });
 
   test('a clip early in the ride starts where the data does', () {

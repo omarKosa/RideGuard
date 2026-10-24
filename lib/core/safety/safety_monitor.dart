@@ -96,7 +96,11 @@ class SafetyMonitor {
     this.noiseMinSpeedKmh = 20,
     WobbleDetector? wobble,
   }) : _wobble = wobble ?? WobbleDetector(),
-       _clips = onClip == null ? null : ClipRecorder();
+       // A crash is confirmed up to confirmWithin (+ one update) after its
+       // impact; its clip is centred on the impact, so keep that much more.
+       _clips = onClip == null
+           ? null
+           : ClipRecorder(lookback: confirmWithin + 1);
 
   /// A monitor using thresholds learned for this bike and mount.
   factory SafetyMonitor.tuned(
@@ -118,6 +122,8 @@ class SafetyMonitor {
 
   /// Raw IMU from 5 s before to 5 s after each reported hazard, delivered
   /// once complete (or cut short by [takeNoise] at the end of the ride).
+  /// A crash's clip is centred on the impact or on the bike going down, not
+  /// on the later confirmation.
   final void Function(Hazard hazard, MotionClip clip)? onClip;
 
   /// Total acceleration (g) that counts as an impact.
@@ -170,8 +176,7 @@ class SafetyMonitor {
   int? _second;
   double _secWobble = 0;
   double _secPeakG = 0;
-  double _secPeakRms = -1;
-  double _secHz = 0;
+  double? _secHz;
   double? _secSpeedKmh;
   int _secGyro = 0;
   bool _secRiding = false;
@@ -243,13 +248,12 @@ class SafetyMonitor {
     }
     _secGyro++;
     final wobbling = _wobble.add(rate, t, dt);
-    if (_wobble.rms > _secPeakRms) {
-      _secPeakRms = _wobble.rms;
-      _secHz = _wobble.frequencyHz;
-    }
     if (_wobble.frequencyHz >= _wobble.minHz &&
-        _wobble.frequencyHz <= _wobble.maxHz) {
-      _secWobble = math.max(_secWobble, _wobble.rms);
+        _wobble.frequencyHz <= _wobble.maxHz &&
+        (_secHz == null || _wobble.rms > _secWobble)) {
+      // The wobble-band shake and its frequency come from the same sample.
+      _secWobble = _wobble.rms;
+      _secHz = _wobble.frequencyHz;
     }
     if (!wobbling) {
       _wobbleSince = null;
@@ -315,7 +319,7 @@ class SafetyMonitor {
       } else if (armed &&
           stoppedSince != null &&
           t - math.max(stoppedSince, impactT) >= stoppedFor) {
-        _crash(t, _impactSpeedKmh, _impactPeakG);
+        _crash(t, _impactSpeedKmh, _impactPeakG, at: impactT);
         return;
       } else if (t - impactT > confirmWithin) {
         _impactT = null;
@@ -328,7 +332,7 @@ class SafetyMonitor {
         t - downSince >= downFor &&
         !riding &&
         t - _lastMovingT <= recentMotion) {
-      _crash(t, _downSpeedKmh, null);
+      _crash(t, _downSpeedKmh, null, at: downSince);
       return;
     }
 
@@ -342,15 +346,19 @@ class SafetyMonitor {
     }
   }
 
-  void _crash(double t, double speedKmh, double? peakG) {
+  /// [at] is when it happened (impact, or the bike going down); the clip
+  /// is centred there.
+  void _crash(double t, double speedKmh, double? peakG, {required double at}) {
     _crashFiredAt = t;
     _impactT = null;
-    _emit(HazardKind.crash, t, speedKmh: speedKmh, peakAccelG: peakG);
+    _emit(HazardKind.crash, t, speedKmh: speedKmh, peakAccelG: peakG, at: at);
   }
 
+  /// [at]: event time for the clip, when earlier than the report [t].
   void _emit(
     HazardKind kind,
     double t, {
+    double? at,
     double? speedKmh,
     double? peakAccelG,
     double? wobbleHz,
@@ -373,7 +381,7 @@ class SafetyMonitor {
       longitude: s?.lastFix?.longitude,
     );
     // Only hazards actually reported get a clip.
-    _clips?.capture(hazard);
+    _clips?.capture(hazard, at: at);
     onHazard(hazard);
   }
 
@@ -432,8 +440,7 @@ class SafetyMonitor {
     _second = second;
     _secWobble = 0;
     _secPeakG = 0;
-    _secPeakRms = -1;
-    _secHz = 0;
+    _secHz = null;
     _secSpeedKmh = null;
     _secGyro = 0;
     _secRiding = false;
@@ -481,8 +488,9 @@ class _Second {
   final double wobble;
   final double peakG;
 
-  /// Oscillation frequency at the second's strongest rotation.
-  final double hz;
+  /// Frequency of the wobble-band shake behind [wobble]; null when the
+  /// second had none.
+  final double? hz;
 
   /// From the latest speed in the second.
   final SpeedBand? band;

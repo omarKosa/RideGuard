@@ -38,13 +38,19 @@ class MotionClip {
 }
 
 /// Keeps the last few seconds of raw IMU and cuts a [MotionClip] from
-/// [before] seconds ahead of each captured hazard to [after] seconds past
+/// [before] seconds ahead of each captured event to [after] seconds past
 /// it.
 class ClipRecorder {
-  ClipRecorder({this.before = 5, this.after = 5});
+  ClipRecorder({this.before = 5, this.after = 5, this.lookback = 0});
 
   final double before;
   final double after;
+
+  /// How long before a hazard is reported its event may have happened (a
+  /// crash is confirmed seconds after the impact). The buffer keeps
+  /// [lookback] + [before] seconds; an older event is clamped to
+  /// [lookback] before the report.
+  final double lookback;
 
   /// Rows per stream the backend accepts; faster sensors are thinned.
   static const maxRows = 1500;
@@ -55,7 +61,7 @@ class ClipRecorder {
 
   final ListQueue<(double, Vec3)> _accel = ListQueue();
   final ListQueue<(double, Vec3)> _gyro = ListQueue();
-  final List<Hazard> _pending = [];
+  final List<(Hazard, double)> _pending = [];
   double? _firstT;
 
   /// Raw accelerometer including gravity, phone frame, m/s².
@@ -64,17 +70,21 @@ class ClipRecorder {
   /// Gyroscope, phone frame, rad/s.
   void addGyro(Vec3 rate, double t) => _add(_gyro, rate, t);
 
-  /// Starts a clip around [h] (same clock as the samples).
-  void capture(Hazard h) {
-    if (h.t.isFinite) _pending.add(h);
+  /// Starts a clip around [h], centred on the event time [at] (default:
+  /// when it was reported), same clock as the samples. Row times are
+  /// relative to [at].
+  void capture(Hazard h, {double? at}) {
+    if (!h.t.isFinite) return;
+    final event = at != null && at.isFinite ? at : h.t;
+    _pending.add((h, math.min(h.t, math.max(event, h.t - lookback))));
   }
 
   /// Clips whose [after] seconds have passed by [t].
   List<(Hazard, MotionClip)> poll(double t) {
     if (_pending.isEmpty) return const [];
     final done = [
-      for (final h in _pending)
-        if (t > h.t + after) h,
+      for (final p in _pending)
+        if (t > p.$2 + after) p,
     ];
     if (done.isEmpty) return const [];
     _pending.removeWhere(done.contains);
@@ -106,8 +116,9 @@ class ClipRecorder {
       _accel.isEmpty ? double.negativeInfinity : _accel.last.$1,
       _gyro.isEmpty ? double.negativeInfinity : _gyro.last.$1,
     );
-    for (final h in _pending) {
-      from = math.min(from, h.t);
+    from -= lookback;
+    for (final (_, at) in _pending) {
+      from = math.min(from, at);
     }
     from -= before;
     for (final q in [_accel, _gyro]) {
@@ -117,18 +128,18 @@ class ClipRecorder {
     }
   }
 
-  List<(Hazard, MotionClip)> _cut(List<Hazard> hazards) => [
-    for (final h in hazards)
-      if (_clip(h) case final clip?) (h, clip),
+  List<(Hazard, MotionClip)> _cut(List<(Hazard, double)> pending) => [
+    for (final (h, at) in pending)
+      if (_clip(at) case final clip?) (h, clip),
   ];
 
-  MotionClip? _clip(Hazard h) {
-    final accel = _rows(_accel, h);
-    final gyro = _rows(_gyro, h);
+  MotionClip? _clip(double at) {
+    final accel = _rows(_accel, at);
+    final gyro = _rows(_gyro, at);
     final rate = _rate(accel) ?? _rate(gyro);
     if (rate == null) return null;
-    final firstT = _firstT ?? h.t;
-    final start = (firstT - h.t)
+    final firstT = _firstT ?? at;
+    final start = (firstT - at)
         .clamp(math.max(-before, _minStartOffsetS), 0.0)
         .toDouble();
     return MotionClip(
@@ -139,8 +150,8 @@ class ClipRecorder {
     );
   }
 
-  List<List<double>> _rows(ListQueue<(double, Vec3)> q, Hazard h) {
-    final from = h.t - before, to = h.t + after;
+  List<List<double>> _rows(ListQueue<(double, Vec3)> q, double at) {
+    final from = at - before, to = at + after;
     final window = [
       for (final s in q)
         if (s.$1 >= from && s.$1 <= to) s,
@@ -149,7 +160,7 @@ class ClipRecorder {
     return [
       for (var i = 0; i < window.length; i += math.max(step, 1))
         [
-          _round(window[i].$1 - h.t, 1e4),
+          _round(window[i].$1 - at, 1e4),
           _round(window[i].$2.x, 1e4),
           _round(window[i].$2.y, 1e4),
           _round(window[i].$2.z, 1e4),

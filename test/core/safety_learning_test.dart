@@ -263,7 +263,7 @@ void main() {
       expect(slow.wobbleRms.total, inInclusiveRange(50, 65));
       expect(fast.wobbleRms.total, inInclusiveRange(50, 65));
       expect(slow.peakG.total, slow.wobbleRms.total);
-      expect(slow.wobbleHz.total, slow.wobbleRms.total);
+      expect(slow.wobbleHz.total, lessThanOrEqualTo(slow.wobbleRms.total));
       expect(noise.bands[SpeedBand.b120plus], isNull);
       // Every band second is also in the ride-wide histograms.
       final inBands = noise.bands.values.fold(
@@ -289,6 +289,33 @@ void main() {
       expect(noise.toJson().keys, ['wobble_rms', 'peak_g', 'imu_hz']);
       // Valid JSON.
       jsonEncode(api);
+    });
+
+    test('wobble_hz is the frequency of the wobble-band shake only', () {
+      RideNoise ride(Vec3 Function(double) extraRate) {
+        final p = _Monitored();
+        final sim = RideSimulator(mount: Mount.handlebarPortrait);
+        sim.still(p, 5);
+        p.captureStillReference();
+        sim.accelerateTo(p, 50);
+        sim.run(p, 60, leanAt: (_) => 0, extraRate: extraRate);
+        expect(p.hazards, isEmpty);
+        return p.monitor.takeNoise();
+      }
+
+      // 20 Hz buzz, above the wobble band: dominates every second.
+      const w20 = 2 * math.pi * 20;
+      final buzz = ride(
+        (t) => Vec3(0, 0.6 * math.sin(w20 * t), 0),
+      ).bands[SpeedBand.b40to60]!;
+      expect(buzz.wobbleRms.total, greaterThan(55));
+      expect(buzz.wobbleHz.total, lessThan(buzz.wobbleRms.total * 0.2));
+      expect(buzz.wobbleHz.quantile(1)!, lessThanOrEqualTo(13));
+
+      // 9 Hz shake, inside the band: every second has its frequency.
+      final shake = ride(_vibration(0.35)).bands[SpeedBand.b40to60]!;
+      expect(shake.wobbleHz.total, shake.wobbleRms.total);
+      expect(shake.wobbleHz.quantile(0.5)!, closeTo(9, 1));
     });
 
     test('speed bands', () {
