@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ride_guard/core/fusion/estimators.dart';
 import 'package:ride_guard/core/fusion/motion_pipeline.dart';
 import 'package:ride_guard/core/math/vec3.dart';
 import 'package:ride_guard/core/safety/motion_clip.dart';
@@ -311,5 +312,66 @@ void main() {
     expect(clip.gyro.length, inInclusiveRange(1000, 1500));
     expect(clip.rateHz, closeTo(clip.accel.length / 10, 5));
     expect(clip.accel.first[1], 0.1235);
+  });
+
+  test('a sample is checked for hazards before any clip is delivered', () {
+    MotionState at(double t, double kmh) => MotionState(
+      t: t,
+      speedKmh: kmh,
+      speedSource: SpeedSource.gps,
+      leanDeg: 0,
+      physicsLeanDeg: 0,
+      accelLeanDeg: 0,
+      rollRate: 0,
+      yawRate: 0,
+      forwardAccel: 0,
+      lateralAccel: 0,
+      isStill: kmh == 0,
+      stillFor: 0,
+      mountReady: true,
+      forwardLearned: true,
+      straightOffsetDeg: 0,
+      mountRealignments: 0,
+    );
+    final hazards = <Hazard>[];
+    // A clip handler that fails (or is slow) must not cost detection.
+    final m = SafetyMonitor(
+      onHazard: hazards.add,
+      onClip: (_, _) => throw StateError('upload queue full'),
+    );
+    const upright = Vec3(0, 0, 9.81);
+    var t = 0.0;
+    void step(double kmh, {double g = 1}) {
+      t = double.parse((t + 0.02).toStringAsFixed(2));
+      try {
+        m.addAccel(upright * g, t);
+      } on StateError {
+        // The handler's failure surfaces, after detection.
+      }
+      if ((t * 100).round() % 10 == 0) m.update(at(t, kmh), null);
+    }
+
+    while (t < 1) {
+      step(60);
+    }
+    step(60, g: 5); // pothole: a warning with a clip
+    while (t < 6.3) {
+      step(60);
+    }
+    expect([for (final h in hazards) h.kind], [HazardKind.impact]);
+    // The pothole's clip completes on this very sample: a crash impact.
+    final clipDone = hazards.single.t + 5;
+    while (t < clipDone - 0.01) {
+      step(60);
+    }
+    step(60, g: 8);
+    while (t < clipDone + 8) {
+      step(0);
+    }
+    expect(
+      [for (final h in hazards) h.kind],
+      [HazardKind.impact, HazardKind.crash],
+    );
+    expect(hazards.last.peakAccelG, closeTo(8, 0.01));
   });
 }

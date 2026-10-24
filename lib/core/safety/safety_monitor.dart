@@ -217,11 +217,13 @@ class SafetyMonitor {
   void addAccel(Vec3 accel, double t) {
     if (!accel.isFinite) return;
     _rollSecond(t);
-    final clips = _clips;
-    if (clips != null) {
-      clips.addAccel(accel, t);
-      _deliver(clips.poll(t));
-    }
+    _clips?.addAccel(accel, t);
+    _detectImpact(accel, t);
+    // After detection: a slow or failing clip handler never delays it.
+    _deliverDone(t);
+  }
+
+  void _detectImpact(Vec3 accel, double t) {
     final dt = _lastAccelT == null
         ? 0.02
         : (t - _lastAccelT!).clamp(0.001, 0.2).toDouble();
@@ -248,11 +250,12 @@ class SafetyMonitor {
   void addGyro(Vec3 rate, double t, double dt) {
     if (!rate.isFinite) return;
     _rollSecond(t);
-    final clips = _clips;
-    if (clips != null) {
-      clips.addGyro(rate, t);
-      _deliver(clips.poll(t));
-    }
+    _clips?.addGyro(rate, t);
+    _detectWobble(rate, t, dt);
+    _deliverDone(t);
+  }
+
+  void _detectWobble(Vec3 rate, double t, double dt) {
     _secGyro++;
     final wobbling = _wobble.add(rate, t, dt);
     if (_wobble.frequencyHz >= _wobble.minHz &&
@@ -393,6 +396,11 @@ class SafetyMonitor {
     // Only hazards actually reported get a clip.
     _clips?.capture(hazard, at: at);
     onHazard(hazard);
+  }
+
+  void _deliverDone(double t) {
+    final clips = _clips;
+    if (clips != null) _deliver(clips.poll(t));
   }
 
   void _deliver(List<(Hazard, MotionClip)> clips) {
