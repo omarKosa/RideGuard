@@ -148,7 +148,7 @@ riding looks like on this phone, bike and mount
   the evidence needed to tune the defaults across riders.
 
 ### 8. Bike catalogue and the init-ride check
-**Catalogue.** `backend/app/catalogue/bikes.json` (about 120 models, mostly
+**Catalogue.** `backend/app/catalogue/bikes.json` (202 models across 21 makes at the time of writing, mostly
 what is sold in Turkey and Saudi Arabia) ships with both the backend and the
 app. The API loads it into the `catalogue_models` table at startup. Setup
 asks for the make, then the model; **Other** takes a free-text make, model
