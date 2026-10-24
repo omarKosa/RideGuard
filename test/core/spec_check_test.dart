@@ -93,9 +93,52 @@ void main() {
       scooter,
       const PerformanceReadings(peakAccelMps2: 3.5),
     );
-    expect(c.envelope!.maxAccelMps2, closeTo(2.5, 1e-9));
-    expect(c.results[SpecItem.acceleration], CheckResult.mismatch);
-    expect(c.mismatch, isTrue);
+    expect(c.envelope!.maxAccelMps2, closeTo(5.0, 1e-9));
+    expect(c.results[SpecItem.acceleration], isNot(CheckResult.mismatch));
+    expect(c.mismatch, isFalse);
+    final hard = SpecCheck.run(
+      scooter,
+      const PerformanceReadings(peakAccelMps2: 6.5),
+    );
+    expect(hard.results[SpecItem.acceleration], CheckResult.mismatch);
+    expect(hard.mismatch, isTrue);
+  });
+
+  test('a 125 commuter launching at 4 m/s2 is never a mismatch', () {
+    final commuter = CatalogueModel(
+      id: 'commuter-125',
+      make: 'X',
+      model: 'Z',
+      yearFrom: 2020,
+      yearTo: null,
+      markets: {'TR'},
+      category: BikeCategory.commuter,
+      abs: AbsFitment.no,
+      displacementCc: _v(125),
+      powerKw: _v(6.5),
+      weightKg: _v(120),
+    );
+    const launch = PerformanceReadings(peakAccelMps2: 4);
+    expect(
+      SpecCheck.run(commuter, launch).results[SpecItem.acceleration],
+      isNot(CheckResult.mismatch),
+    );
+    // Nor any small bike in the shipped catalogue.
+    final cat = realCatalogue();
+    final small = [
+      for (final make in cat.makes)
+        ...cat
+            .modelsFor(make)
+            .where((m) => (m.displacementCc?.value ?? 999) <= 125),
+    ];
+    expect(small, isNotEmpty);
+    for (final m in small) {
+      expect(
+        SpecCheck.run(m, launch).results[SpecItem.acceleration],
+        isNot(CheckResult.mismatch),
+        reason: m.id,
+      );
+    }
   });
 
   test('braking beyond tyre grip', () {

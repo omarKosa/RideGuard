@@ -43,7 +43,9 @@ class ModelEnvelope {
   }
 
   static const g = 9.81;
-  static const minAccelFloor = 2.5;
+  /// Floor of the power-to-weight bound: even a 125 commuter launches at
+  /// 3-4 m/s2, so anything less would call normal riding impossible.
+  static const minAccelFloor = 5.0;
   static const riderKg = 80.0;
 
   final double? topSpeedKmh;
