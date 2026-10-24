@@ -194,8 +194,9 @@ class RideNoise {
 /// * wobble = 3 × floor of wobble-band oscillation
 /// * impact = 1.25 × floor of per-second peak acceleration
 ///
-/// Warnings the rider said did not happen push the matching threshold
-/// just above that event. Cancelled crashes are only counted: "I'm OK"
+/// Warnings the rider said did not happen push the matching warning
+/// threshold just above that event; the impact a crash needs stays at the
+/// normal-riding value. Cancelled crashes are only counted: "I'm OK"
 /// doesn't mean it wasn't a crash, so crash detection never loosens.
 class SafetyBaseline {
   SafetyBaseline({
@@ -363,6 +364,8 @@ class SafetyBaseline {
       }
     }
 
+    // Before any false-alarm raise: crash detection never loosens.
+    final crashImpact = math.min(impact, SafetyTuning.maxImpactG);
     final fw = falseWobbleRms, fi = falseImpactG, fl = falseLeanDeg;
     if (fw != null) wobble = math.max(wobble, fw * 1.15);
     if (fi != null) impact = math.max(impact, fi * 1.1);
@@ -389,6 +392,7 @@ class SafetyBaseline {
       wobbleMinRms: wobble,
       wobbleMaxHz: maxHz,
       impactG: impact,
+      crashImpactG: crashImpact,
       extremeLeanDeg: lean,
       warnings: warnings,
     );

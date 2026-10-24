@@ -9,6 +9,7 @@ class SafetyTuning {
     this.wobbleMinRms = defaultWobbleRms,
     this.wobbleMaxHz = defaultWobbleMaxHz,
     this.impactG = defaultImpactG,
+    this.crashImpactG = defaultImpactG,
     this.extremeLeanDeg = defaultExtremeLeanDeg,
     this.warnings = const [],
   });
@@ -33,7 +34,14 @@ class SafetyTuning {
 
   /// Highest wobble frequency this phone's sensor rate can resolve.
   final double wobbleMaxHz;
+
+  /// Jolt that is reported as an impact warning (raised by NO answers).
   final double impactG;
+
+  /// Jolt that, followed by stopping, is a crash: learned from normal
+  /// riding only. No answer on a warning ever raises it, so labels can't
+  /// make crash detection less sensitive.
+  final double crashImpactG;
   final double extremeLeanDeg;
 
   /// Things the rider should know about this setup.

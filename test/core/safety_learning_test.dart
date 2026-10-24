@@ -237,6 +237,28 @@ void main() {
   });
 
   group('learning from simulated rides', () {
+    test('no on an impact never makes crash detection less sensitive', () {
+      final base = SafetyBaseline(calibrationId: 'c').withRide(_noise(600));
+      final tuning = base.withFalseImpact(5.5).tuning;
+      expect(tuning.impactG, SafetyTuning.maxImpactG);
+      expect(tuning.crashImpactG, SafetyTuning.defaultImpactG);
+      expect(base.tuning.crashImpactG, base.tuning.impactG);
+
+      // A 5 g jolt the rider rides through: no warning any more.
+      final (p, sim) = _rideOff(tuning);
+      sim.cruise(p, 5);
+      sim.impact(p, g: 4);
+      sim.cruise(p, 20);
+      expect(p.hazards, isEmpty);
+
+      // The same jolt followed by stopping is still a crash.
+      sim.impact(p, g: 4);
+      sim.brakeToStop(p, decel: 12);
+      sim.still(p, 8);
+      expect([for (final h in p.hazards) h.kind], [HazardKind.crash]);
+      expect(p.hazards.single.peakAccelG, inInclusiveRange(4.5, 5.5));
+    });
+
     test('only steady riding away from hazards is learned', () {
       final (p, sim) = _rideOff();
       sim.cruise(p, 60);

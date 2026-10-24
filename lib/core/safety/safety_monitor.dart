@@ -95,7 +95,9 @@ class SafetyMonitor {
     this.warningCooldown = 10.0,
     this.noiseMinSpeedKmh = 20,
     WobbleDetector? wobble,
-  }) : _wobble = wobble ?? WobbleDetector(),
+    double? crashImpactG,
+  }) : crashImpactG = math.min(crashImpactG ?? impactG, impactG),
+       _wobble = wobble ?? WobbleDetector(),
        // A crash is confirmed up to confirmWithin (+ one update) after its
        // impact; its clip is centred on the impact, so keep that much more.
        _clips = onClip == null
@@ -111,6 +113,7 @@ class SafetyMonitor {
     onHazard: onHazard,
     onClip: onClip,
     impactG: tuning.impactG,
+    crashImpactG: tuning.crashImpactG,
     extremeLeanDeg: tuning.extremeLeanDeg,
     wobble: WobbleDetector(
       minRms: tuning.wobbleMinRms,
@@ -126,8 +129,12 @@ class SafetyMonitor {
   /// on the later confirmation.
   final void Function(Hazard hazard, MotionClip clip)? onClip;
 
-  /// Total acceleration (g) that counts as an impact.
+  /// Total acceleration (g) reported as an impact warning.
   final double impactG;
+
+  /// Total acceleration (g) that, followed by stopping, is a crash. Never
+  /// above [impactG]: what the rider said about warnings doesn't raise it.
+  final double crashImpactG;
 
   /// Speed that arms crash detection.
   final double armSpeedKmh;
@@ -225,7 +232,7 @@ class SafetyMonitor {
 
     final g = accel.length / gravity;
     _secPeakG = math.max(_secPeakG, g);
-    if (g < impactG || t - _lastMovingT > 3) return;
+    if (g < crashImpactG || t - _lastMovingT > 3) return;
     final impactT = _impactT;
     if (impactT != null && t - impactT < 1.0) {
       _impactPeakG = math.max(_impactPeakG, g);
@@ -306,12 +313,15 @@ class SafetyMonitor {
     if (impactT != null) {
       if (!_impactReported && t - impactT >= 0.2) {
         _impactReported = true;
-        _emit(
-          HazardKind.impact,
-          t,
-          speedKmh: _impactSpeedKmh,
-          peakAccelG: _impactPeakG,
-        );
+        // Below the warning threshold it can still become a crash.
+        if (_impactPeakG >= impactG) {
+          _emit(
+            HazardKind.impact,
+            t,
+            speedKmh: _impactSpeedKmh,
+            peakAccelG: _impactPeakG,
+          );
+        }
       }
       final stoppedSince = _stoppedSince;
       if (riding && t - impactT > 3) {
