@@ -14,16 +14,22 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import 'package:ride_guard/core/analysis/performance_meter.dart';
 import 'package:ride_guard/core/calibration/calibration_session.dart';
+import 'package:ride_guard/core/catalogue/spec_check.dart';
 import 'package:ride_guard/core/fusion/motion_pipeline.dart';
+import 'package:ride_guard/core/safety/motion_clip.dart';
 import 'package:ride_guard/core/safety/safety_monitor.dart';
 import 'package:ride_guard/core/safety/safety_tuning.dart';
 import 'package:ride_guard/data/api_client.dart';
+import 'package:ride_guard/data/bike_catalogue.dart';
 import 'package:ride_guard/data/outbox.dart';
 import 'package:ride_guard/data/remote_repository.dart';
 import 'package:ride_guard/data/sync_service.dart';
 import 'package:ride_guard/models/bike_profile.dart';
+import 'package:ride_guard/models/calibration_profile.dart';
 import 'package:ride_guard/models/incident.dart';
+import 'package:ride_guard/models/model_check.dart';
 import 'package:ride_guard/models/ride_summary.dart';
 import 'package:ride_guard/services/calibration_profile_builder.dart';
 import 'package:ride_guard/services/phone_info.dart';
@@ -34,6 +40,9 @@ import '../support/ride_simulator.dart';
 
 final _api = Platform.environment['RIDEGUARD_LIVE_API'];
 
+BikeCatalogue _catalogue() =>
+    BikeCatalogue.parse(File(BikeCatalogue.assetPath).readAsStringSync());
+
 void main() {
   const uuid = Uuid();
 
@@ -43,6 +52,12 @@ void main() {
     return jsonDecode(r.body) as Map<String, dynamic>;
   }
 
+  Future<List<Map<String, dynamic>>> getList(String path) async {
+    final r = await http.get(Uri.parse('$_api$path'));
+    expect(r.statusCode, 200, reason: r.body);
+    return (jsonDecode(r.body) as List).cast<Map<String, dynamic>>();
+  }
+
   test('init ride + ride are stored correctly in Postgres', () async {
     final client = ApiClient(baseUrl: () => _api!);
     expect(await client.isHealthy(), isTrue, reason: 'backend at $_api');
@@ -50,13 +65,23 @@ void main() {
     final remote = RemoteRepository(sync);
 
     final riderId = uuid.v4();
+    final catalogue = _catalogue();
+    final gsx = catalogue.byId('suzuki-gsx-s1000-2021')!;
     final bike = BikeProfile(
       id: uuid.v4(),
-      model: 'Live Test MT-09',
-      ratedTopSpeedKmh: 225,
+      model: gsx.model,
+      ratedTopSpeedKmh: gsx.topSpeedKmh?.value ?? 250,
       createdAt: DateTime.now(),
+      catalogueModelId: gsx.id,
+      catalogueVersion: catalogue.version,
+      topSpeedSource: gsx.topSpeedKmh == null
+          ? TopSpeedSource.rider
+          : TopSpeedSource.catalogue,
     );
-    await remote.upsertRider(riderId, PhoneInfo.unknown);
+    await remote.upsertRider(
+      riderId,
+      const PhoneInfo(model: 'Live Test Pixel', osVersion: 'Android 15'),
+    );
     await remote.upsertBike(riderId, bike);
 
     // Sensor time is simulated, but timestamps must be "now" for the
@@ -66,57 +91,15 @@ void main() {
     final wallStart = DateTime.now().toUtc().subtract(
       const Duration(minutes: 10),
     );
-    DateTime wall(SimTick t) => wallStart.add(t.time.difference(sim.start));
-    var now = wallStart;
-
-    // ---------------- Init ride ----------------
-    final calPipeline = MotionPipeline(learningMode: true);
-    final session = CalibrationSession(
-      pipeline: calPipeline,
-      ratedTopSpeedKmh: bike.ratedTopSpeedKmh,
-    );
-    final calRecorder = RideRecorder(
-      rideId: uuid.v4(),
-      kind: RideKind.calibration,
-      bikeId: bike.id,
+    final init = await _initRide(
       remote: remote,
-      clock: () => now,
+      sim: sim,
+      bike: bike,
+      wallStart: wallStart,
     );
-    await calRecorder.start();
-    void calTick(SimTick t) {
-      now = wall(t);
-      calRecorder.record(t.state);
-      session.update(t.state, now);
-    }
-
-    final p = calPipeline;
-    sim.still(p, 6, leanDeg: -7, onTick: calTick); // left on the side stand
-    sim.accelerateTo(p, 45, onTick: calTick);
-    sim.cruise(p, 12, onTick: calTick);
-    sim.accelerateTo(p, 168, accel: 3.2, onTick: calTick);
-    sim.accelerateTo(p, 60, accel: 1.0, onTick: calTick);
-    sim.cruise(p, 3, onTick: calTick);
-    sim.brakeToStop(p, decel: 7, onTick: calTick);
-    sim.still(p, 1, onTick: calTick);
-    sim.accelerateTo(p, 40, onTick: calTick);
-    sim.turn(p, -22, 6, onTick: calTick);
-    sim.cruise(p, 3, onTick: calTick);
-    sim.turn(p, 24, 6, onTick: calTick);
-    sim.cruise(p, 2, onTick: calTick);
-    expect(session.isFinished, isTrue);
-    expect(session.skippedTasks, isEmpty);
-
-    final calSummary = await calRecorder.finish();
-    final profile = buildCalibrationProfile(
-      id: uuid.v4(),
-      bikeId: bike.id,
-      summary: calSummary,
-      session: session,
-      pipeline: calPipeline,
-      calibratedAt: now,
-    )!;
-    expect(profile.quality, greaterThan(0.9));
-    await remote.saveCalibration(profile);
+    final profile = init.profile;
+    var now = init.end;
+    DateTime wall(SimTick t) => wallStart.add(t.time.difference(sim.start));
 
     // ---------------- Regular ride ----------------
     final ride = MotionPipeline(params: profile.params);
@@ -142,7 +125,52 @@ void main() {
     sim.turn(ride, -36, 8, onTick: rideTick);
     sim.brakeToStop(ride, decel: 8, onTick: rideTick);
     sim.still(ride, 2, onTick: rideTick);
+    final incident = Incident.fromHazard(
+      id: uuid.v4(),
+      rideId: rideRecorder.rideId,
+      hazard: const Hazard(
+        kind: HazardKind.wobble,
+        t: 1,
+        speedKmh: 110,
+        leanDeg: 2,
+        wobbleHz: 7,
+        wobbleRms: 0.7,
+      ),
+      detectedAt: now,
+    );
+    await remote.saveIncident(incident);
+    await remote.saveIncident(incident.labelled(RiderLabel.yes, now));
+    await remote.saveIncidentClip(
+      rideRecorder.rideId,
+      incident.id,
+      MotionClip(
+        rateHz: 50,
+        startOffsetS: -0.1,
+        accel: [
+          for (var i = 0; i < 5; i++) [i * 0.02 - 0.1, 0.1, 0.2, 9.8],
+        ],
+        gyro: [
+          for (var i = 0; i < 5; i++) [i * 0.02 - 0.1, 0.0, 0.01, 0.02],
+        ],
+      ),
+    );
     final rideSummary = await rideRecorder.finish();
+
+    // The init ride's readings judged against the catalogue model.
+    final check = ModelCheck(
+      id: uuid.v4(),
+      bikeId: bike.id,
+      calibrationId: profile.id,
+      rideId: init.summary.rideId,
+      reason: ModelCheck.initRide,
+      checkedAt: now,
+      catalogueModelId: gsx.id,
+      catalogueVersion: catalogue.version,
+      imuHz: 50,
+      phoneModel: 'Live Test Pixel',
+      check: SpecCheck.run(gsx, init.readings),
+    );
+    await remote.saveModelCheck(check);
 
     // ---------------- Deliver and verify ----------------
     await sync.flush();
@@ -187,11 +215,104 @@ void main() {
     expect(stats['ride_count'], 1);
     expect((stats['latest_calibration'] as Map)['id'], profile.id);
 
+    final rider = await get('/v1/riders/$riderId');
+    expect(rider['phone_model'], 'Live Test Pixel');
+    expect(rider['os_version'], 'Android 15');
+    final storedBike = await get('/v1/bikes/${bike.id}');
+    expect(storedBike['catalogue_model_id'], gsx.id);
+    expect(storedBike['catalogue_version'], catalogue.version);
+    expect(storedBike['other_model'], isNull);
+
+    final checks = await getList('/v1/bikes/${bike.id}/model-checks');
+    expect(checks, hasLength(1));
+    expect(checks.single['id'], check.id);
+    expect(checks.single['reason'], 'init_ride');
+    expect(checks.single['catalogue_model_id'], gsx.id);
+    expect(checks.single['mismatch'], isFalse);
+    expect(checks.single['expected'], isNotNull);
+    expect(
+      (checks.single['measured'] as Map)['sustained_top_speed_kmh'],
+      isNotNull,
+    );
+
+    final incidents = await getList(
+      '/v1/rides/${rideSummary.rideId}/incidents',
+    );
+    expect(incidents.single['id'], incident.id);
+    expect(incidents.single['rider_label'], 'yes');
+    expect(incidents.single['labelled_at'], isNotNull);
+    expect(incidents.single['false_alarm'], isFalse);
+    final initStored = await get('/v1/rides/${init.summary.rideId}');
+    expect(initStored['performance'], isNotNull);
+    expect(initStored['kind'], 'calibration');
+
     // ignore: avoid_print
     print(
       'LIVE OK bike=${bike.id} ride=${rideSummary.rideId} '
       'cal=${profile.id} samples=${rideSummary.sampleCount}',
     );
+  }, skip: _api == null ? 'set RIDEGUARD_LIVE_API to run' : false);
+
+  test('an Other bike is stored with its text and shows in the gaps', () async {
+    final client = ApiClient(baseUrl: () => _api!);
+    final sync = SyncService(api: client, store: MemoryOutboxStore());
+    final remote = RemoteRepository(sync);
+    final riderId = uuid.v4();
+    final make = 'LiveMake${uuid.v4().substring(0, 8)}';
+    final bike = BikeProfile(
+      id: uuid.v4(),
+      model: '$make Rocket',
+      ratedTopSpeedKmh: 140,
+      createdAt: DateTime.now(),
+      otherMake: make,
+      otherModel: 'Rocket',
+      otherYear: 2019,
+    );
+    expect(bike.isOther, isTrue);
+    await remote.upsertRider(riderId, PhoneInfo.unknown);
+    await remote.upsertBike(riderId, bike);
+
+    final sim = RideSimulator(mount: Mount.euler(10, 20, 30));
+    final wallStart = DateTime.now().toUtc().subtract(
+      const Duration(minutes: 10),
+    );
+    final init = await _initRide(
+      remote: remote,
+      sim: sim,
+      bike: bike,
+      wallStart: wallStart,
+    );
+    // No model to judge against: saved as data, everything "not tested".
+    final check = ModelCheck(
+      id: uuid.v4(),
+      bikeId: bike.id,
+      calibrationId: init.profile.id,
+      rideId: init.summary.rideId,
+      reason: ModelCheck.initRide,
+      checkedAt: init.end,
+      otherMake: make,
+      otherModel: 'Rocket',
+      otherYear: 2019,
+      check: SpecCheck.run(null, init.readings),
+    );
+    await remote.saveModelCheck(check);
+    await sync.flush();
+    expect(sync.pending, 0, reason: sync.lastError);
+    expect(sync.dropped, 0, reason: sync.lastError);
+
+    final storedBike = await get('/v1/bikes/${bike.id}');
+    expect(storedBike['catalogue_model_id'], isNull);
+    expect(storedBike['other_make'], make);
+    expect(storedBike['other_model'], 'Rocket');
+    expect(storedBike['other_year'], 2019);
+    final checks = await getList('/v1/bikes/${bike.id}/model-checks');
+    expect(checks.single['catalogue_model_id'], isNull);
+    expect(checks.single['other_make'], make);
+    expect(checks.single['expected'], isNull);
+    expect(checks.single['mismatch'], isFalse);
+    expect((checks.single['results'] as Map).values.toSet(), {'not_tested'});
+    // ignore: avoid_print
+    print('LIVE OTHER make=$make bike=${bike.id}');
   }, skip: _api == null ? 'set RIDEGUARD_LIVE_API to run' : false);
 
   test('detected hazards are stored as incidents', () async {
@@ -295,6 +416,81 @@ void main() {
     expect(stats['imu_hz'], 50);
     expect(stats['wobble_threshold_rms'], SafetyTuning.defaultWobbleRms);
   }, skip: _api == null ? 'set RIDEGUARD_LIVE_API to run' : false);
+}
+
+class _InitRide {
+  _InitRide(this.profile, this.summary, this.readings, this.end);
+  final CalibrationProfile profile;
+  final RideSummary summary;
+  final PerformanceReadings readings;
+  final DateTime end;
+}
+
+/// The simulated init ride through the real pipeline, recorder and outbox;
+/// uploads the calibration. Time continues from [wallStart] (the caller's
+/// ride picks up at the returned end).
+Future<_InitRide> _initRide({
+  required RemoteRepository remote,
+  required RideSimulator sim,
+  required BikeProfile bike,
+  required DateTime wallStart,
+}) async {
+  const uuid = Uuid();
+  DateTime wall(SimTick t) => wallStart.add(t.time.difference(sim.start));
+  var now = wallStart;
+  final meter = PerformanceMeter();
+  final calPipeline = MotionPipeline(learningMode: true);
+  final session = CalibrationSession(
+    pipeline: calPipeline,
+    ratedTopSpeedKmh: bike.ratedTopSpeedKmh,
+  );
+  final calRecorder = RideRecorder(
+    rideId: uuid.v4(),
+    kind: RideKind.calibration,
+    bikeId: bike.id,
+    remote: remote,
+    clock: () => now,
+  );
+  await calRecorder.start();
+  void calTick(SimTick t) {
+    now = wall(t);
+    meter.add(t.state);
+    final stop = calRecorder.record(t.state);
+    if (stop != null) meter.addStop(stop);
+    session.update(t.state, now);
+  }
+
+  final p = calPipeline;
+  sim.still(p, 6, leanDeg: -7, onTick: calTick); // left on the side stand
+  sim.accelerateTo(p, 45, onTick: calTick);
+  sim.cruise(p, 12, onTick: calTick);
+  sim.accelerateTo(p, 168, accel: 3.2, onTick: calTick);
+  sim.accelerateTo(p, 60, accel: 1.0, onTick: calTick);
+  sim.cruise(p, 3, onTick: calTick);
+  sim.brakeToStop(p, decel: 7, onTick: calTick);
+  sim.still(p, 1, onTick: calTick);
+  sim.accelerateTo(p, 40, onTick: calTick);
+  sim.turn(p, -22, 6, onTick: calTick);
+  sim.cruise(p, 3, onTick: calTick);
+  sim.turn(p, 24, 6, onTick: calTick);
+  sim.cruise(p, 2, onTick: calTick);
+  expect(session.isFinished, isTrue);
+  expect(session.skippedTasks, isEmpty);
+
+  final calSummary = await calRecorder.finish(
+    performance: meter.readings.toApiJson(),
+  );
+  final profile = buildCalibrationProfile(
+    id: uuid.v4(),
+    bikeId: bike.id,
+    summary: calSummary,
+    session: session,
+    pipeline: calPipeline,
+    calibratedAt: now,
+  )!;
+  expect(profile.quality, greaterThan(0.9));
+  await remote.saveCalibration(profile);
+  return _InitRide(profile, calSummary, meter.readings, now);
 }
 
 /// Forwards raw IMU readings to both the pipeline and the monitor.

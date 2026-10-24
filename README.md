@@ -20,7 +20,8 @@ docker-compose.yml   Postgres + API (+ test runner)
 ## How it works
 
 ### 1. Setup → init ride
-The app starts on **bike setup** (model + fastest possible speed). It then
+The app starts on **bike setup**: pick the make, then the model (see
+section 8), and the fastest possible speed. It then
 shows a **safety briefing** that must be acknowledged, and runs the **init
 ride**. The ride advances by itself (vibrating at each step), so the rider
 never touches the phone:
@@ -142,8 +143,80 @@ riding looks like on this phone, bike and mount
 * Redoing the init ride (possibly a new mount) starts learning over, and
   Settings can reset it manually.
 * Each ride uploads its statistics and the thresholds it used
-  (`safety_stats`), and incidents carry the rider's `false_alarm` label.
-  The server keeps the evidence needed to tune the defaults across riders.
+  (`safety_stats`, including per-speed-band figures in `bands`), and
+  incidents carry the rider's `rider_label` (`yes` / `no`). The server keeps
+  the evidence needed to tune the defaults across riders.
+
+### 8. Bike catalogue and the init-ride check
+**Catalogue.** `backend/app/catalogue/bikes.json` (about 120 models, mostly
+what is sold in Turkey and Saudi Arabia) ships with both the backend and the
+app. The API loads it into the `catalogue_models` table at startup. Setup
+asks for the make, then the model; **Other** takes a free-text make, model
+and year. A model the rider picks is stored as `catalogue_model_id` plus the
+catalogue `catalogue_version`; the rider sees nothing new on ride screens
+because a model is known.
+
+*Add a model:* append an entry to `models` in `bikes.json` (and the make to
+`make_order` if it is new), then run `python -m pytest tests/test_catalogue.py`
+in `backend/`. The file is validated on load. Sourcing rules:
+
+* Every non-null spec (displacement, power, weight, top speed, 0-100 km/h)
+  has a `source` URL and a `quality`: `official` (maker or distributor),
+  `road_test` or `aggregator`.
+* A value nobody could verify is `null`. Empty beats guessed.
+* Versions of a bike that differ between markets (TR vs SA) are separate
+  entries.
+* Bump `version` when the file changes.
+
+**Init-ride check.** Only at the end of the init ride (and when the rider
+fixes the model afterwards, using the readings already kept), the readings
+are judged against what the model can physically do. It is never run on
+regular rides.
+
+| Item | Mismatch only when |
+|---|---|
+| Top speed | sustained >= 3 s above top speed x 1.07 + 3 km/h |
+| Acceleration | forward acceleration averaged over 1 s above 1.2 x the expected maximum |
+| Braking | deceleration averaged over 0.5 s, or a stop's mean, above 1.2 x the braking limit |
+
+Gentle riding is **not tested**, never a mismatch. On a top speed mismatch
+the bike's top speed becomes the measured one. Each check is uploaded as a
+model check and an "Other" bike is saved the same way, with everything
+"not tested", so the catalogue's gaps show up in the reports below.
+
+**Reports.** From `backend/` with `DATABASE_URL` set:
+
+```bash
+python -m app.reports gaps         # Other bikes: what the catalogue is missing
+python -m app.reports mismatches   # models whose specs the riders contradict
+```
+
+(Docker: `docker compose exec api python -m app.reports gaps`.)
+
+### 9. Alert cards
+After a ride (and the init ride), each alert gets a card: swipe right or tap
+**YES** if it really happened, swipe left or **NO** if not. **SKIP** (or
+back) ends the review and leaves the remaining alerts unanswered. No alerts,
+no cards. A **NO** on a
+warning raises that threshold like NOT REAL did (wobble x1.15, impact x1.1,
+lean +3 degrees, within the caps). Crash labels are data only: no label makes
+crash detection less sensitive. Older clients that send `false_alarm` are
+still accepted.
+
+### 10. Data collected for later tuning
+No machine learning runs anywhere; the server just keeps clean data for
+tuning the defaults by hand:
+
+* Per ride: `safety_stats` (normal-riding statistics, thresholds used, IMU
+  rate, `bands`), and `performance` (sustained top speed, peak acceleration
+  and braking, stops) on init rides.
+* Per incident: kind, speed, lean, peak acceleration, wobble figures, the
+  outcome, the rider's label and when it was given, and a raw motion
+  **clip** (about 5 s either side at the IMU rate, accelerometer and gyro
+  in the phone frame).
+* Per bike: the catalogue model and version, or the Other text, plus the
+  phone model and OS version on the rider.
+* Per model check: expected envelope, measured readings, per-item results.
 
 ## Run the backend
 
@@ -156,7 +229,9 @@ open http://localhost:8000/docs   # interactive API docs
 
 Postgres is published on `127.0.0.1:5432` only. The API listens on all
 interfaces so a phone on the same Wi-Fi can reach it. Migrations run
-automatically at API start.
+automatically at API start. An existing install needs
+`docker compose up -d --build` to rebuild the API image so migrations
+002-004 (labels, clips, catalogue, model checks) are applied.
 
 > If `docker` says *permission denied*, either prefix commands with `sudo`
 > or add yourself to the group: `sudo usermod -aG docker $USER` (then log
@@ -183,6 +258,7 @@ flutter test                                        # app: fusion, analysis, syn
 docker compose --profile test run --rm api-test     # backend against real Postgres
 RIDEGUARD_LIVE_API=http://localhost:8000 \
   flutter test test/integration                     # app → API → Postgres end to end
+                                                    # (catalogue bike, Other bike, model check, label, clip)
 ```
 
 The app tests use a physics-based ride simulator
@@ -194,17 +270,20 @@ acceleration and braking, with the phone mounted at any rotation.
 
 | Method | Path | |
 |---|---|---|
-| PUT | `/v1/riders/{id}` | Upsert rider (device) |
-| PUT/GET | `/v1/bikes/{id}` | Upsert / read bike |
+| PUT/GET | `/v1/riders/{id}` | Upsert (platform, phone model, OS version) / read rider |
+| PUT/GET | `/v1/bikes/{id}` | Upsert / read bike (catalogue model + version, or Other make / model / year) |
+| PUT | `/v1/bikes/{id}/model-checks/{check_id}` | Init-ride spec check (idempotent; first write wins) |
+| GET | `/v1/bikes/{id}/model-checks` | A bike's checks, newest first |
 | GET | `/v1/bikes/{id}/rides` | Ride history (`?kind=ride\|calibration`) |
 | GET | `/v1/bikes/{id}/stats` | All-time bests + latest calibration |
 | PUT/GET | `/v1/rides/{id}` | Start (header) / read ride |
 | POST | `/v1/rides/{id}/samples` | Batch of 10 Hz samples (idempotent) |
-| PUT | `/v1/rides/{id}/summary` | Finish: totals, window stats, brake events |
+| PUT | `/v1/rides/{id}/summary` | Finish: totals, window stats, brake events, `safety_stats` (with `bands`), `performance` |
 | GET | `/v1/rides/{id}/analysis?window_min=15` | Server-side window recomputation (default 15) |
 | PUT/GET | `/v1/calibrations/{id}` | Calibration result (immutable) |
-| PUT | `/v1/rides/{id}/incidents/{incident_id}` | Crash / wobble / impact / extreme lean (upsert; a crash moves from `pending` to its outcome once; warnings can get `false_alarm`) |
+| PUT | `/v1/rides/{id}/incidents/{incident_id}` | Crash / wobble / impact / extreme lean (upsert; a crash moves from `pending` to its outcome once; warnings can get a `rider_label`; the deprecated `false_alarm` is still accepted) |
 | GET | `/v1/rides/{id}/incidents` | A ride's incidents in order |
+| PUT | `/v1/rides/{id}/incidents/{incident_id}/clip` | Raw motion around an incident (accelerometer + gyro) |
 | GET | `/health` | API + database health |
 
 ## Safety
