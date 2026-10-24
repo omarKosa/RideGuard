@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 
 from .catalogue_sync import sync_catalogue
 from .db import create_pool, migrate
-from .routers import calibrations, incidents, riders, rides
+from .routers import calibrations, incidents, model_checks, riders, rides
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 
@@ -38,6 +38,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
     app.include_router(rides.router)
     app.include_router(calibrations.router)
     app.include_router(incidents.router)
+    app.include_router(model_checks.router)
 
     @app.get("/health", tags=["ops"])
     async def health(request: Request):

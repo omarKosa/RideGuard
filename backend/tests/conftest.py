@@ -38,7 +38,7 @@ async def client():
         async with app.state.pool.acquire() as conn:
             await conn.execute(
                 "TRUNCATE riders, bikes, rides, calibrations, ride_samples, "
-                "brake_events, incidents CASCADE"
+                "brake_events, incidents, model_checks CASCADE"
             )
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
@@ -120,3 +120,30 @@ async def start_ride(client, bike_id: str, kind: str = "ride", **extra) -> str:
     )
     assert r.status_code == 200, r.text
     return ride_id
+
+
+async def make_calibration(client, bike_id: str) -> tuple[str, str]:
+    """Stores a calibration (and its init ride) for the bike. Returns
+    (calibration_id, ride_id)."""
+    ride_id = await start_ride(client, bike_id, kind="calibration")
+    cal_id = new_id()
+    r = await client.put(
+        f"/v1/calibrations/{cal_id}",
+        json={
+            "bike_id": bike_id,
+            "ride_id": ride_id,
+            "calibrated_at": iso(T0 + timedelta(minutes=5)),
+            "mount_up": [0.0, 0.9397, 0.3420],
+            "mount_forward": [0.0, -0.3420, 0.9397],
+            "gyro_bias": [0.0, 0.0, 0.0],
+            "linear_accel_bias": [0.0, 0.0, 0.0],
+            "lean_gain": 1.0,
+            "forward_from_motion": True,
+            "straight_offset_deg": 0.0,
+            "quality": 0.9,
+            "skipped_tasks": [],
+            "warnings": [],
+        },
+    )
+    assert r.status_code == 200, r.text
+    return cal_id, ride_id

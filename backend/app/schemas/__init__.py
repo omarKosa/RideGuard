@@ -10,6 +10,7 @@ from .incidents import (
     IncidentOut,
     IncidentOutcome,
 )
+from .model_checks import ModelCheckIn, ModelCheckOut
 from .riders import (
     BikeIn,
     BikeOut,
@@ -36,7 +37,7 @@ __all__ = [
     "BrakeEventIn", "BrakeEventOut",
     "CalibrationIn", "CalibrationOut",
     "IncidentIn", "IncidentKind", "IncidentOut", "IncidentOutcome",
-    "LeanMagnitude",
+    "LeanMagnitude", "ModelCheckIn", "ModelCheckOut",
     "RideIn", "RideOut", "RideSummaryIn", "RiderIn", "RiderOut",
     "SafetyStatsIn", "SampleBatchIn", "SampleBatchOut", "SampleIn",
     "SpeedKmh", "StatsIn", "Strict", "Vec3", "WindowAnalysisOut",
