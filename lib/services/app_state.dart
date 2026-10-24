@@ -238,7 +238,9 @@ class AppState extends ChangeNotifier {
         reason: reason,
         checkedAt: DateTime.now(),
         catalogueModelId: id,
-        catalogueVersion: bike.catalogueVersion,
+        // The version whose data built the envelope, not the one saved
+        // with the bike.
+        catalogueVersion: id == null ? null : _catalogue.version,
         otherMake: bike.isOther ? bike.otherMake : null,
         otherModel: bike.isOther ? (bike.otherModel ?? bike.model) : null,
         otherYear: bike.isOther ? bike.otherYear : null,

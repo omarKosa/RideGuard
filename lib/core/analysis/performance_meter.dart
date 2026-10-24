@@ -29,25 +29,46 @@ class PerformanceReadings {
 
   static const maxApiStops = 50;
 
+  // Backend ModelCheckIn limits (backend/app/schemas/model_checks.py).
+  static const maxApiSpeedKmh = 500.0;
+  static const maxApiAccelMps2 = 100.0;
+  static const maxApiStopS = 120.0;
+
   final double? sustainedTopSpeedKmh;
   final double? peakAccelMps2;
   final double? peakDecelMps2;
   final List<BrakeEvent> stops;
 
-  /// Shape the backend's `measured` block expects.
+  /// Shape the backend's `measured` block expects. A value outside the
+  /// schema would get the whole check rejected (and dropped by the outbox),
+  /// so: stops the schema can't hold (rounded duration <= 0 or > 120 s,
+  /// mean decel > 100 m/s2, i.e. clock steps or crash-like glitches) are
+  /// left out before the 50-stop cap; peaks and top speed are clamped into
+  /// range, keeping the direction of an extreme reading (the local check
+  /// already judged the raw values). [toJson] keeps everything as measured.
   Map<String, dynamic> toApiJson() => {
-    'sustained_top_speed_kmh': _opt(sustainedTopSpeedKmh),
-    'peak_accel_mps2': _opt(peakAccelMps2),
-    'peak_decel_mps2': _opt(peakDecelMps2),
-    'stops': [
-      for (final s in stops.take(maxApiStops))
-        {
-          'start_speed_kmh': _r2(s.startSpeedKmh),
-          'duration_s': _r2(s.durationS),
-          'mean_decel_mps2': _r2(s.meanDecelMps2),
-        },
-    ],
+    'sustained_top_speed_kmh': _clamped(sustainedTopSpeedKmh, maxApiSpeedKmh),
+    'peak_accel_mps2': _clamped(peakAccelMps2, maxApiAccelMps2),
+    'peak_decel_mps2': _clamped(peakDecelMps2, maxApiAccelMps2),
+    'stops': stops.map(_apiStop).nonNulls.take(maxApiStops).toList(),
   };
+
+  static Map<String, dynamic>? _apiStop(BrakeEvent s) {
+    final duration = _r2(s.durationS);
+    final speed = _r2(s.startSpeedKmh);
+    final decel = _r2(s.meanDecelMps2);
+    if (duration <= 0 || duration > maxApiStopS) return null;
+    if (speed < 0 || speed > maxApiSpeedKmh) return null;
+    if (decel < 0 || decel > maxApiAccelMps2) return null;
+    return {
+      'start_speed_kmh': speed,
+      'duration_s': duration,
+      'mean_decel_mps2': decel,
+    };
+  }
+
+  static double? _clamped(double? v, double max) =>
+      v == null ? null : _r2(v.clamp(0, max).toDouble());
 
   /// Local storage form (full brake events).
   Map<String, dynamic> toJson() => {

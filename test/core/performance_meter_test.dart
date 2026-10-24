@@ -112,4 +112,68 @@ void main() {
     }
     expect((m.readings.toApiJson()['stops'] as List).length, 50);
   });
+
+  test('api json only carries stops and peaks the backend accepts', () {
+    final t0 = DateTime.utc(2026);
+    BrakeEvent stop(Duration d, double fromKmh) => BrakeEvent(
+      startedAt: t0,
+      endedAt: t0.add(d),
+      startSpeedKmh: fromKmh,
+      distanceM: 1,
+      peakDecelMps2: 9,
+    );
+    final readings = PerformanceReadings(
+      sustainedTopSpeedKmh: 612,
+      peakAccelMps2: -0.4,
+      peakDecelMps2: 140,
+      stops: [
+        stop(Duration.zero, 30), // clock stepped back
+        stop(const Duration(milliseconds: 13), 60), // ~1280 m/s2
+        stop(const Duration(seconds: 200), 50), // longer than 120 s
+        stop(const Duration(seconds: 4), 60), // a real stop
+      ],
+    );
+    final api = readings.toApiJson();
+    final stops = (api['stops'] as List).cast<Map<String, dynamic>>();
+    expect(stops, hasLength(1));
+    expect(stops.single['duration_s'], 4);
+    for (final s in stops) {
+      expect(s['duration_s'], allOf(greaterThan(0), lessThanOrEqualTo(120)));
+      expect(s['mean_decel_mps2'], inInclusiveRange(0, 100));
+      expect(s['start_speed_kmh'], inInclusiveRange(0, 500));
+    }
+    expect(api['sustained_top_speed_kmh'], 500);
+    expect(api['peak_accel_mps2'], 0);
+    expect(api['peak_decel_mps2'], 100);
+    // Local storage keeps everything as measured.
+    final local = readings.toJson();
+    expect((local['stops'] as List), hasLength(4));
+    expect(local['sustained_top_speed_kmh'], 612);
+    expect(local['peak_decel_mps2'], 140);
+  });
+
+  test('dropped stops are not sent and do not count', () {
+    final t0 = DateTime.utc(2026);
+    final readings = PerformanceReadings(
+      stops: [
+        for (var i = 0; i < 10; i++)
+          BrakeEvent(
+            startedAt: t0,
+            endedAt: t0,
+            startSpeedKmh: 40,
+            distanceM: 0,
+            peakDecelMps2: 4,
+          ),
+        for (var i = 0; i < 45; i++)
+          BrakeEvent(
+            startedAt: t0,
+            endedAt: t0.add(const Duration(seconds: 3)),
+            startSpeedKmh: 40,
+            distanceM: 20,
+            peakDecelMps2: 4,
+          ),
+      ],
+    );
+    expect((readings.toApiJson()['stops'] as List).length, 45);
+  });
 }

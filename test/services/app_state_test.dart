@@ -19,7 +19,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../support/fakes.dart';
 
 /// Two models with known top speeds, so results don't depend on the data.
-final _catalogue = BikeCatalogue.parse('''
+final _catalogue = BikeCatalogue.parse(_catalogueJson);
+
+const _catalogueJson = '''
 {
   "version": "test.1",
   "make_order": ["Testa"],
@@ -40,7 +42,7 @@ final _catalogue = BikeCatalogue.parse('''
      "zero_to_100_s": null}
   ]
 }
-''');
+''';
 
 CalibrationProfile _calibrationFor(BikeProfile bike) => CalibrationProfile(
   id: 'a0000000-0000-4000-8000-000000000001',
@@ -70,11 +72,11 @@ void main() {
   stack;
   late AppState app;
 
-  Future<AppState> open() async {
+  Future<AppState> open({BikeCatalogue? catalogue}) async {
     final a = AppState(
       store: await LocalStore.open(),
       remote: stack.remote,
-      catalogue: _catalogue,
+      catalogue: catalogue ?? _catalogue,
       phoneInfo: () async =>
           const PhoneInfo(model: 'Pixel 9', osVersion: 'Android 16'),
     );
@@ -290,4 +292,22 @@ void main() {
     expect(reloaded.initReadings, isNull);
     expect(reloaded.startupStep, StartupStep.calibration);
   });
+
+  test(
+    'the check carries the catalogue version its envelope came from',
+    () async {
+      final bike = await app.saveBike(
+        CatalogueChoice(model: _catalogue.byId('testa-250-2020')!),
+      );
+      expect(bike.catalogueVersion, 'test.1');
+      // An app update ships a newer catalogue before the init ride.
+      app = await open(
+        catalogue: BikeCatalogue.parse(
+          _catalogueJson.replaceFirst('"test.1"', '"test.2"'),
+        ),
+      );
+      await initRide(200);
+      expect(checks(bike.id).single['catalogue_version'], 'test.2');
+    },
+  );
 }

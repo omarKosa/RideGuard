@@ -24,8 +24,8 @@ class RemoteRepository {
         'os_version': clipText(phone.osVersion, 40),
       });
 
-  /// Backend caps other_make/other_model; the full text stays in `model`.
-
+  /// Backend caps other_make/other_model (clipped); the full text stays in
+  /// `model`.
   Future<void> upsertBike(String riderId, BikeProfile bike) =>
       _sync.enqueue('PUT', '/v1/bikes/${bike.id}', {
         'rider_id': riderId,

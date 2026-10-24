@@ -246,9 +246,12 @@ void main() {
     expect(check['measured']['sustained_top_speed_kmh'], isNotNull);
     expect(check['results']['top_speed'], 'not_tested');
     expect(check['mismatch'], isFalse);
-    // Nothing impossible: the rider's top speed stands.
-    expect(app.bike!.ratedTopSpeedKmh, 250);
-    expect(app.bike!.topSpeedSource, TopSpeedSource.rider);
+    // Nothing impossible: the stated top speed stands.
+    expect(app.bike!.ratedTopSpeedKmh, gsx.topSpeedKmh?.value ?? 250);
+    expect(
+      app.bike!.topSpeedSource,
+      gsx.topSpeedKmh == null ? TopSpeedSource.rider : TopSpeedSource.catalogue,
+    );
     expect(app.initReadings!.calibrationId, result.id);
   });
 
