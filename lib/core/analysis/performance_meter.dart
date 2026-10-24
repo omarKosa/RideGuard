@@ -1,6 +1,7 @@
 import 'dart:collection';
 
 import '../../models/brake_event.dart';
+import '../fusion/estimators.dart';
 import '../fusion/motion_pipeline.dart';
 
 double _r2(double v) => double.parse(v.toStringAsFixed(2));
@@ -39,18 +40,44 @@ class PerformanceReadings {
   final double? peakDecelMps2;
   final List<BrakeEvent> stops;
 
+  /// A stop can't start much faster than the bike was ever sustained at;
+  /// one that does began at a GPS glitch (one wild fix just before
+  /// braking), so its mean deceleration is meaningless.
+  static const stopStartFactor = 1.1;
+  static const stopStartSlackKmh = 5.0;
+
+  /// Fastest believable start of a stop; null without a sustained top
+  /// speed (nothing to compare against).
+  double? get maxStopStartKmh {
+    final top = sustainedTopSpeedKmh;
+    return top == null ? null : top * stopStartFactor + stopStartSlackKmh;
+  }
+
+  /// Stops that did not start at a glitch (all of them when there is no
+  /// sustained top speed to compare with).
+  Iterable<BrakeEvent> get plausibleStops {
+    final max = maxStopStartKmh;
+    return max == null ? stops : stops.where((s) => s.startSpeedKmh <= max);
+  }
+
+  /// Stops whose mean deceleration can be judged against the model: only
+  /// with a sustained top speed to rule out glitches.
+  Iterable<BrakeEvent> get judgeableStops =>
+      maxStopStartKmh == null ? const [] : plausibleStops;
+
   /// Shape the backend's `measured` block expects. A value outside the
   /// schema would get the whole check rejected (and dropped by the outbox),
   /// so: stops the schema can't hold (rounded duration <= 0 or > 120 s,
-  /// mean decel > 100 m/s2, i.e. clock steps or crash-like glitches) are
-  /// left out before the 50-stop cap; peaks and top speed are clamped into
+  /// mean decel > 100 m/s2, i.e. clock steps or crash-like glitches) and
+  /// stops that started at a GPS glitch ([plausibleStops]) are left out
+  /// before the 50-stop cap; peaks and top speed are clamped into
   /// range, keeping the direction of an extreme reading (the local check
   /// already judged the raw values). [toJson] keeps everything as measured.
   Map<String, dynamic> toApiJson() => {
     'sustained_top_speed_kmh': _clamped(sustainedTopSpeedKmh, maxApiSpeedKmh),
     'peak_accel_mps2': _clamped(peakAccelMps2, maxApiAccelMps2),
     'peak_decel_mps2': _clamped(peakDecelMps2, maxApiAccelMps2),
-    'stops': stops.map(_apiStop).nonNulls.take(maxApiStops).toList(),
+    'stops': plausibleStops.map(_apiStop).nonNulls.take(maxApiStops).toList(),
   };
 
   static Map<String, dynamic>? _apiStop(BrakeEvent s) {
@@ -83,6 +110,10 @@ class PerformanceReadings {
 
 class PerformanceMeter {
   static const _topWindowS = 3.0;
+
+  /// Distinct GPS fixes needed inside the top-speed window, so one wild
+  /// fix carried forward by dead reckoning is never "sustained".
+  static const _minTopFixes = 3;
   static const _accelWindowS = 1.0;
   static const _decelWindowS = 0.5;
   static const _minMovingKmh = 5.0;
@@ -110,8 +141,10 @@ class PerformanceMeter {
     stops: List.unmodifiable(_stops),
   );
 
+  /// Only speed backed by fresh GPS counts (not dead reckoning through a
+  /// gap), and the window must hold several distinct fixes.
   void _updateTop(MotionState s) {
-    if (!s.speedReliable) {
+    if (s.speedSource != SpeedSource.gps) {
       _speedRun.clear();
       return;
     }
@@ -121,12 +154,16 @@ class PerformanceMeter {
       _speedRun.removeFirst();
     }
     if (s.t - _speedRun.first.t < _topWindowS - _tol) return;
+    final from = s.t - _topWindowS - _tol;
     var minSpeed = double.infinity;
+    final fixes = <double>{};
     for (final x in _speedRun) {
-      if (x.t >= s.t - _topWindowS - _tol && x.speedKmh < minSpeed) {
-        minSpeed = x.speedKmh;
-      }
+      if (x.t < from) continue;
+      if (x.speedKmh < minSpeed) minSpeed = x.speedKmh;
+      final fix = x.lastFix;
+      if (fix != null && fix.t >= from) fixes.add(fix.t);
     }
+    if (fixes.length < _minTopFixes) return;
     if (_top == null || minSpeed > _top!) _top = minSpeed;
   }
 

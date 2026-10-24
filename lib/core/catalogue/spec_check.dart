@@ -135,10 +135,13 @@ class SpecCheck {
     return CheckResult.notTested;
   }
 
+  /// A stop's mean deceleration comes from GPS speeds, so stops that began
+  /// at a glitch (or can't be told apart from one) are not judged; the
+  /// IMU's peak deceleration always is.
   static CheckResult _brake(double max, PerformanceReadings m) {
     final peak = m.peakDecelMps2;
     if ((peak != null && peak > impossibleFactor * max) ||
-        m.stops.any((s) => s.meanDecelMps2 > impossibleFactor * max)) {
+        m.judgeableStops.any((s) => s.meanDecelMps2 > impossibleFactor * max)) {
       return CheckResult.mismatch;
     }
     if (peak != null && peak >= matchFactor * max) return CheckResult.match;
