@@ -122,8 +122,8 @@ class SpecCheck {
 
   static CheckResult _top(double? top, double? v) {
     if (top == null || v == null) return CheckResult.notTested;
-    if (v > top * topSpeedFactor + topSpeedSlackKmh)
-      return CheckResult.mismatch;
+    final limit = top * topSpeedFactor + topSpeedSlackKmh;
+    if (v > limit) return CheckResult.mismatch;
     if (v >= topMatchFactor * top) return CheckResult.match;
     return CheckResult.notTested;
   }
