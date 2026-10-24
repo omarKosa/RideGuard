@@ -80,11 +80,13 @@ class _CalibrationViewState extends State<CalibrationView> {
     final c = context.watch<CalibrationController>();
     final result = c.result;
     final session = c.session;
-    // Alerts from the init ride are asked about before the result.
-    final reviewing =
-        c.phase == CalibrationPhase.finished &&
-        !c.alertsReviewed &&
-        c.incidents.isNotEmpty;
+    // Alerts from the init ride are asked about before the result, also
+    // when it was stopped (the answers are uploaded; with no calibration
+    // there is nothing to learn them into).
+    final ended =
+        c.phase == CalibrationPhase.finished ||
+        c.phase == CalibrationPhase.aborted;
+    final reviewing = ended && !c.alertsReviewed && c.incidents.isNotEmpty;
 
     final Widget body = switch (c.phase) {
       CalibrationPhase.running when session != null => RunningView(

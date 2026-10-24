@@ -7,6 +7,8 @@ import 'package:ride_guard/core/fusion/mount_orientation.dart';
 import 'package:ride_guard/core/math/vec3.dart';
 import 'package:ride_guard/core/safety/safety_monitor.dart';
 import 'package:ride_guard/data/local_store.dart';
+import 'package:ride_guard/data/remote_repository.dart';
+import 'package:ride_guard/data/sync_service.dart';
 import 'package:ride_guard/models/bike_choice.dart';
 import 'package:ride_guard/models/calibration_profile.dart';
 import 'package:ride_guard/screens/calibration/calibration_screen.dart';
@@ -18,15 +20,21 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../support/fakes.dart';
 
-/// An init ride that has just finished, without riding it.
+/// An init ride that has just finished (or been stopped), without riding
+/// it.
 class _FinishedInitRide extends CalibrationController {
-  _FinishedInitRide({required super.app, required super.safety, this.done})
-    : super(feed: SensorFeed(FakeSensorSource()));
+  _FinishedInitRide({
+    required super.app,
+    required super.safety,
+    this.done,
+    this.ended = CalibrationPhase.finished,
+  }) : super(feed: SensorFeed(FakeSensorSource()));
 
   final CalibrationProfile? done;
+  final CalibrationPhase ended;
 
   @override
-  CalibrationPhase get phase => CalibrationPhase.finished;
+  CalibrationPhase get phase => ended;
 
   @override
   CalibrationProfile? get result => done;
@@ -36,15 +44,20 @@ void main() {
   setUpAll(() => GoogleFonts.config.allowRuntimeFetching = false);
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  late ({SyncService sync, RemoteRepository remote, RecordingBackend backend})
+  stack;
+  late AppState app;
+
   Future<_FinishedInitRide> pumpFinished(
     WidgetTester tester, {
     required bool alerts,
+    bool aborted = false,
   }) async {
     tester.view.physicalSize = const Size(1600, 3200);
     tester.view.devicePixelRatio = 2;
     addTearDown(tester.view.reset);
-    final stack = offlineFirstStack();
-    final app = AppState(
+    stack = offlineFirstStack();
+    app = AppState(
       store: await LocalStore.open(),
       remote: stack.remote,
       catalogue: realCatalogue(),
@@ -81,16 +94,22 @@ void main() {
     final cal = _FinishedInitRide(
       app: app,
       safety: safety,
-      done: CalibrationProfile(
-        id: 'cal-1',
-        bikeId: bike.id,
-        rideId: 'cal-ride',
-        calibratedAt: DateTime.utc(2026, 10, 24),
-        params: FusionParams(mount: MountOrientation.provisional(Vec3.unitY)),
-        forwardFromMotion: true,
-        straightOffsetDeg: 0,
-        quality: 0.9,
-      ),
+      ended: aborted ? CalibrationPhase.aborted : CalibrationPhase.finished,
+      // A stopped init ride has no result to accept.
+      done: aborted
+          ? null
+          : CalibrationProfile(
+              id: 'cal-1',
+              bikeId: bike.id,
+              rideId: 'cal-ride',
+              calibratedAt: DateTime.utc(2026, 10, 24),
+              params: FusionParams(
+                mount: MountOrientation.provisional(Vec3.unitY),
+              ),
+              forwardFromMotion: true,
+              straightOffsetDeg: 0,
+              quality: 0.9,
+            ),
     );
     addTearDown(safety.dispose);
     await tester.pumpWidget(
@@ -148,5 +167,42 @@ void main() {
     await pumpFinished(tester, alerts: false);
     expect(find.byKey(const Key('alert-card')), findsNothing);
     expect(find.text('CALIBRATED'), findsOneWidget);
+  });
+
+  testWidgets('a stopped init ride still asks about its alerts', (
+    tester,
+  ) async {
+    final cal = await pumpFinished(tester, alerts: true, aborted: true);
+    expect(find.text('ALERT 1 OF 2'), findsOneWidget);
+    expect(find.text('INIT RIDE STOPPED'), findsNothing);
+
+    await tester.tap(find.byKey(const Key('alert-no')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('alert-yes')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('INIT RIDE STOPPED'), findsOneWidget);
+    expect(cal.incidents.map((i) => i.riderLabel?.name), ['no', 'yes']);
+    // The labels are uploaded...
+    await tester.runAsync(stack.sync.flush);
+    final sent = stack.backend.bodiesFor(
+      'PUT',
+      '/v1/rides/cal-ride/incidents/',
+    );
+    expect(
+      sent.map((b) => b['rider_label']).where((l) => l != null),
+      containsAll(['no', 'yes']),
+    );
+    // ...but there is no calibration to learn them into.
+    expect(cal.safetyBaseline, isNull);
+    expect(app.safetyBaseline, isNull);
+  });
+
+  testWidgets('a stopped init ride without alerts shows the stopped view', (
+    tester,
+  ) async {
+    await pumpFinished(tester, alerts: false, aborted: true);
+    expect(find.byKey(const Key('alert-card')), findsNothing);
+    expect(find.text('INIT RIDE STOPPED'), findsOneWidget);
   });
 }
