@@ -7,7 +7,7 @@ import '../services/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/sync_indicator.dart';
-import 'bike_setup_screen.dart';
+import 'bike_setup/bike_setup_screen.dart';
 import 'ride/ride_screen.dart';
 import 'safety_briefing_screen.dart';
 import 'settings/settings_screen.dart';
@@ -61,7 +61,7 @@ class _HomeScreenState extends State<HomeScreen>
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          '${bike.model} · ${bike.ratedTopSpeedKmh.toStringAsFixed(0)} km/h',
+                          bike.model,
                           overflow: TextOverflow.ellipsis,
                           style: AppText.body(16, color: AppColors.textMuted),
                         ),

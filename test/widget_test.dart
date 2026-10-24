@@ -52,13 +52,18 @@ void main() {
 
     await tester.tap(find.byKey(const Key('save-bike')));
     await tester.pumpAndSettle();
-    expect(find.text('Enter your motorcycle model'), findsOneWidget);
+    expect(find.text('Choose your make'), findsOneWidget);
+
+    await tester.ensureVisible(find.byKey(const Key('other-bike')));
+    await tester.tap(find.byKey(const Key('other-bike')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('save-bike')));
+    await tester.pumpAndSettle();
+    expect(find.text('Enter the model'), findsOneWidget);
     expect(find.text('Enter a speed in km/h'), findsOneWidget);
 
-    await tester.enterText(
-      find.byKey(const Key('model-field')),
-      'Yamaha MT-07',
-    );
+    await tester.enterText(find.byKey(const Key('other-make')), 'Yamaha');
+    await tester.enterText(find.byKey(const Key('other-model')), 'MT-07');
     await tester.enterText(find.byKey(const Key('top-speed-field')), '900');
     await tester.tap(find.byKey(const Key('save-bike')));
     await tester.pumpAndSettle();

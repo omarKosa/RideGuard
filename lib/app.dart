@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 
 import 'data/api_client.dart';
 import 'data/sync_service.dart';
-import 'screens/bike_setup_screen.dart';
+import 'screens/bike_setup/bike_setup_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/safety_briefing_screen.dart';
 import 'services/app_state.dart';
