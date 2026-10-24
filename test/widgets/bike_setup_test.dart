@@ -123,6 +123,15 @@ CatalogueModel _firstWhere(bool Function(CatalogueModel) test) {
   ].firstWhere(test);
 }
 
+bool _makeSelected(WidgetTester tester, String make) =>
+    tester.widget<MakeChip>(find.byKey(Key('make-$make'))).selected;
+
+void _legacy(String model) => SharedPreferences.setMockInitialValues({
+  'bike':
+      '{"id":"legacy","model":"$model","rated_top_speed_kmh":214,'
+      '"created_at":"2026-10-01T00:00:00Z"}',
+});
+
 bool _selected(WidgetTester tester, String id) =>
     tester.widget<ModelRow>(find.byKey(Key('model-$id'))).selected;
 
@@ -374,11 +383,13 @@ void main() {
     expect(find.text('HOST'), findsOneWidget);
   });
 
-  testWidgets('editing an Other bike opens the form prefilled', (tester) async {
+  testWidgets('editing an Other bike of a known make opens the picker', (
+    tester,
+  ) async {
     final app = await _app();
     await app.saveBike(
       const OtherChoice(
-        make: 'Ducati',
+        make: 'ducati',
         model: 'Monster',
         year: 2019,
         topSpeedKmh: 230,
@@ -387,9 +398,14 @@ void main() {
     await _calibrate(app);
 
     await _pump(tester, app, editing: true);
+    expect(_makeSelected(tester, 'Ducati'), isTrue);
+    expect(find.byKey(const Key('current-other')), findsOneWidget);
+
+    // Other is one tap away, prefilled.
+    await _tap(tester, 'other-bike');
     String text(String key) =>
         tester.widget<TextFormField>(find.byKey(Key(key))).controller!.text;
-    expect(text('other-make'), 'Ducati');
+    expect(text('other-make'), 'ducati');
     expect(text('other-model'), 'Monster');
     expect(text('other-year'), '2019');
     expect(text('top-speed-field'), '230');
@@ -401,29 +417,27 @@ void main() {
     expect(app.calibration, isNotNull);
     expect(find.text('HOST'), findsOneWidget);
 
-    // Back from the form shows the catalogue; picking from it is a change.
+    // Picking from the catalogue is a change.
     await _tap(tester, 'open-edit');
-    await tester.binding.handlePopRoute();
-    await tester.pumpAndSettle();
     await _pickModel(tester, cat.byId('suzuki-hayabusa-2021')!);
     await _tap(tester, 'save-bike');
     expect(find.text('Fixing the model, or a different bike?'), findsOneWidget);
   });
 
-  testWidgets('a legacy bike opens Other with its text as the model', (
+  testWidgets('a legacy bike "Yamaha MT-07" opens the picker on Yamaha', (
     tester,
   ) async {
-    SharedPreferences.setMockInitialValues({
-      'bike':
-          '{"id":"legacy","model":"Yamaha MT-07","rated_top_speed_kmh":214,'
-          '"created_at":"2026-10-01T00:00:00Z"}',
-    });
+    _legacy('Yamaha MT-07');
     final app = await _app();
     await _calibrate(app);
     await _pump(tester, app, editing: true);
+    expect(_makeSelected(tester, 'Yamaha'), isTrue);
+    expect(find.byKey(const Key('other-make')), findsNothing);
+
+    // Keeping it as Other: the form has the text split into make and model.
+    await _tap(tester, 'other-bike');
     String text(String key) =>
         tester.widget<TextFormField>(find.byKey(Key(key))).controller!.text;
-    // A known make at the start of the text is split off.
     expect(text('other-make'), 'Yamaha');
     expect(text('other-model'), 'MT-07');
     expect(text('top-speed-field'), '214');
@@ -434,6 +448,54 @@ void main() {
     expect(app.bike!.otherModel, 'MT-07');
     expect(app.bike!.model, 'Yamaha MT-07');
     expect(app.calibration, isNotNull);
+  });
+
+  testWidgets('a legacy bike of an unknown make can pick from the list', (
+    tester,
+  ) async {
+    _legacy('Aprilia RS 660');
+    final app = await _app();
+    await _pump(tester, app, editing: true);
+    expect(
+      tester
+          .widget<TextFormField>(find.byKey(const Key('other-model')))
+          .controller!
+          .text,
+      'Aprilia RS 660',
+    );
+
+    await _tap(tester, 'pick-from-list');
+    expect(find.byKey(const Key('make-Honda')), findsOneWidget);
+    expect(find.byKey(const Key('other-make')), findsNothing);
+
+    final m = cat.byId('suzuki-gsx-s1000-2015')!;
+    await _pickModel(tester, m);
+    await _tap(tester, 'save-bike');
+    expect(app.bike!.catalogueModelId, m.id);
+    expect(app.bike!.isOther, isFalse);
+    expect(app.bike!.topSpeedSource, TopSpeedSource.catalogue);
+    expect(find.text('HOST'), findsOneWidget);
+  });
+
+  testWidgets('back from Other when editing leaves the page in one step', (
+    tester,
+  ) async {
+    _legacy('Aprilia RS 660');
+    final app = await _app();
+    await _pump(tester, app, editing: true);
+    expect(find.byKey(const Key('other-make')), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('HOST'), findsOneWidget);
+
+    // Also when the form was opened from the picker.
+    await _tap(tester, 'open-edit');
+    await _tap(tester, 'pick-from-list');
+    await _tap(tester, 'other-bike');
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('HOST'), findsOneWidget);
+    expect(app.bike!.model, 'Aprilia RS 660');
   });
 
   testWidgets('no dialog without a calibration', (tester) async {

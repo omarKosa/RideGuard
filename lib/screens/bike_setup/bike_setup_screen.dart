@@ -61,8 +61,12 @@ class _BikeSetupScreenState extends State<BikeSetupScreen> {
       _selectModel(known);
       _afterFrame(() => _reveal(_selectedKey, alignment: 0.4));
     } else {
-      _other = true;
-      _prefillOther(bike);
+      // Not in the catalogue: start on its make's models when the make is
+      // known (the Other form, prefilled, is one tap away).
+      final make = _prefillOther(bike);
+      _make = make;
+      _allMakes = make != null && _hiddenWhenCollapsed(make);
+      _other = make == null;
     }
   }
 
@@ -83,11 +87,14 @@ class _BikeSetupScreenState extends State<BikeSetupScreen> {
   bool _hiddenWhenCollapsed(String make) =>
       _catalogue.makes.indexOf(make) >= MakeChips.collapsedCount;
 
-  /// An Other or legacy bike (or one no longer in the catalogue). A legacy
-  /// bike's text that starts with a known make is split into make and model.
-  void _prefillOther(BikeProfile bike) {
+  /// Fills the Other form from an Other or legacy bike (or one no longer
+  /// in the catalogue) and returns its catalogue make, if it has one. A
+  /// legacy bike's text that starts with a known make is split into make
+  /// and model.
+  String? _prefillOther(BikeProfile bike) {
     var make = bike.otherMake ?? '';
     var model = bike.isOther ? (bike.otherModel ?? bike.model) : bike.model;
+    String? known;
     if (make.isEmpty) {
       for (final m in _catalogue.makes) {
         if (!model.toLowerCase().startsWith('${m.toLowerCase()} ')) continue;
@@ -95,13 +102,20 @@ class _BikeSetupScreenState extends State<BikeSetupScreen> {
         if (rest.isEmpty) continue;
         make = model.substring(0, m.length);
         model = rest;
+        known = m;
         break;
+      }
+    } else {
+      final typed = make.trim().toLowerCase();
+      for (final m in _catalogue.makes) {
+        if (m.toLowerCase() == typed) known = m;
       }
     }
     _otherMake.text = make;
     _otherModel.text = model;
     _otherYear.text = bike.otherYear?.toString() ?? '';
     _otherTopSpeed.text = TopSpeedField.format(bike.ratedTopSpeedKmh);
+    return known;
   }
 
   /// Picks [m]; the speed field is prefilled only with what the rider
@@ -235,7 +249,9 @@ class _BikeSetupScreenState extends State<BikeSetupScreen> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: !_other,
+      // When editing, back always leaves the page; in first-run setup it
+      // returns from the Other form to the picker.
+      canPop: !_other || widget.editing,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop && _other) _setOther(false);
       },
@@ -243,7 +259,7 @@ class _BikeSetupScreenState extends State<BikeSetupScreen> {
         appBar: widget.editing || _other
             ? AppBar(
                 title: widget.editing ? const Text('EDIT BIKE') : null,
-                leading: _other
+                leading: _other && !widget.editing
                     ? BackButton(onPressed: () => _setOther(false))
                     : null,
               )
@@ -316,6 +332,15 @@ class _BikeSetupScreenState extends State<BikeSetupScreen> {
         ),
         const SizedBox(height: 24),
       ],
+      if (widget.editing && (_bike?.isOther ?? false)) ...[
+        Text(
+          key: const Key('current-other'),
+          'Saved as "${_bike!.model}". Pick it from the list if it\'s there, '
+          'or keep it under Other.',
+          style: AppText.body(15, color: AppColors.textMuted),
+        ),
+        const SizedBox(height: 16),
+      ],
       Text('MAKE', style: AppText.label(13)),
       const SizedBox(height: 10),
       MakeChips(
@@ -347,22 +372,10 @@ class _BikeSetupScreenState extends State<BikeSetupScreen> {
       ],
       const SizedBox(height: 8),
       Center(
-        child: TextButton(
+        child: _Link(
           key: const Key('other-bike'),
-          style: TextButton.styleFrom(
-            foregroundColor: AppColors.amber,
-            minimumSize: const Size(48, 48),
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-          ),
-          onPressed: () => _setOther(true),
-          child: Text(
-            "My bike isn't listed → Other",
-            style: AppText.body(
-              16,
-              color: AppColors.amber,
-              weight: FontWeight.w700,
-            ),
-          ),
+          label: "My bike isn't listed → Other",
+          onTap: () => _setOther(true),
         ),
       ),
     ];
@@ -388,7 +401,7 @@ class _BikeSetupScreenState extends State<BikeSetupScreen> {
     Text('OTHER BIKE', textAlign: TextAlign.center, style: AppText.display(20)),
     const SizedBox(height: 8),
     Text(
-      "Tell us what you ride. We'll add it to the list.",
+      "Tell us what you ride. We'll use it to improve the list.",
       textAlign: TextAlign.center,
       style: AppText.body(16, color: AppColors.textMuted),
     ),
@@ -400,7 +413,47 @@ class _BikeSetupScreenState extends State<BikeSetupScreen> {
       topSpeed: _otherTopSpeed,
       onSubmit: _save,
     ),
+    const SizedBox(height: 8),
+    Center(
+      child: _Link(
+        key: const Key('pick-from-list'),
+        label: 'Choose from the list',
+        icon: Icons.format_list_bulleted,
+        onTap: () => _setOther(false),
+      ),
+    ),
   ];
+}
+
+/// An amber text link with a glove-sized tap target.
+class _Link extends StatelessWidget {
+  const _Link({super.key, required this.label, required this.onTap, this.icon});
+
+  final String label;
+  final VoidCallback onTap;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Text(
+      label,
+      style: AppText.body(16, color: AppColors.amber, weight: FontWeight.w700),
+    );
+    final style = TextButton.styleFrom(
+      foregroundColor: AppColors.amber,
+      minimumSize: const Size(48, 48),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+    );
+    final i = icon;
+    return i == null
+        ? TextButton(style: style, onPressed: onTap, child: text)
+        : TextButton.icon(
+            style: style,
+            onPressed: onTap,
+            icon: Icon(i, size: 20),
+            label: text,
+          );
+  }
 }
 
 class _Logo extends StatelessWidget {
