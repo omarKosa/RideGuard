@@ -69,3 +69,14 @@ def test_rejects_value_without_source():
     with pytest.raises(ValidationError):
         CatalogueModel.model_validate(_model_dict(
             top_speed_kmh={"value": 250, "quality": "road_test"}))
+
+
+async def test_catalogue_loaded_on_startup(client):
+    async with client.app.state.pool.acquire() as conn:
+        n = await conn.fetchval("SELECT count(*) FROM catalogue_models")
+        cc = await conn.fetchval(
+            "SELECT displacement_cc FROM catalogue_models WHERE id = $1",
+            "suzuki-gsx-s1000-2021",
+        )
+    assert n == len(load_catalogue().models)
+    assert cc == 999

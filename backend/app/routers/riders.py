@@ -17,6 +17,11 @@ from ..schemas import (
 from .rides import RIDE_COLUMNS
 
 router = APIRouter(prefix="/v1", tags=["riders & bikes"])
+BIKE_COLUMNS = (
+    "id, rider_id, model, rated_top_speed_kmh, catalogue_model_id, "
+    "catalogue_version, other_make, other_model, other_year, "
+    "top_speed_source, created_at"
+)
 Conn = Annotated[asyncpg.Connection, Depends(get_conn)]
 
 
@@ -24,13 +29,19 @@ Conn = Annotated[asyncpg.Connection, Depends(get_conn)]
 async def upsert_rider(rider_id: UUID, body: RiderIn, conn: Conn):
     row = await conn.fetchrow(
         """
-        INSERT INTO riders (id, platform) VALUES ($1, $2)
+        INSERT INTO riders (id, platform, phone_model, os_version)
+        VALUES ($1, $2, $3, $4)
         ON CONFLICT (id) DO UPDATE
-            SET platform = EXCLUDED.platform, updated_at = now()
-        RETURNING id, platform, created_at
+            SET platform = EXCLUDED.platform,
+                phone_model = EXCLUDED.phone_model,
+                os_version = EXCLUDED.os_version,
+                updated_at = now()
+        RETURNING id, platform, phone_model, os_version, created_at
         """,
         rider_id,
         body.platform,
+        body.phone_model,
+        body.os_version,
     )
     return dict(row)
 
@@ -38,7 +49,7 @@ async def upsert_rider(rider_id: UUID, body: RiderIn, conn: Conn):
 @router.get("/riders/{rider_id}", response_model=RiderOut)
 async def get_rider(rider_id: UUID, conn: Conn):
     row = await conn.fetchrow(
-        "SELECT id, platform, created_at FROM riders WHERE id = $1", rider_id
+        "SELECT id, platform, phone_model, os_version, created_at FROM riders WHERE id = $1", rider_id
     )
     if row is None:
         raise not_found("Rider")
@@ -50,20 +61,34 @@ async def upsert_bike(bike_id: UUID, body: BikeIn, conn: Conn):
     if not await conn.fetchval("SELECT 1 FROM riders WHERE id = $1", body.rider_id):
         raise not_found("Rider")
     row = await conn.fetchrow(
-        """
-        INSERT INTO bikes (id, rider_id, model, rated_top_speed_kmh)
-        VALUES ($1, $2, $3, $4)
+        f"""
+        INSERT INTO bikes (id, rider_id, model, rated_top_speed_kmh,
+                           catalogue_model_id, catalogue_version, other_make,
+                           other_model, other_year, top_speed_source)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         ON CONFLICT (id) DO UPDATE
             SET model = EXCLUDED.model,
                 rated_top_speed_kmh = EXCLUDED.rated_top_speed_kmh,
+                catalogue_model_id = EXCLUDED.catalogue_model_id,
+                catalogue_version = EXCLUDED.catalogue_version,
+                other_make = EXCLUDED.other_make,
+                other_model = EXCLUDED.other_model,
+                other_year = EXCLUDED.other_year,
+                top_speed_source = EXCLUDED.top_speed_source,
                 updated_at = now()
             WHERE bikes.rider_id = EXCLUDED.rider_id
-        RETURNING id, rider_id, model, rated_top_speed_kmh, created_at
+        RETURNING {BIKE_COLUMNS}
         """,
         bike_id,
         body.rider_id,
         body.model.strip(),
         body.rated_top_speed_kmh,
+        body.catalogue_model_id,
+        body.catalogue_version,
+        body.other_make,
+        body.other_model,
+        body.other_year,
+        body.top_speed_source,
     )
     if row is None:
         raise conflict("Bike belongs to another rider")
@@ -73,8 +98,7 @@ async def upsert_bike(bike_id: UUID, body: BikeIn, conn: Conn):
 @router.get("/bikes/{bike_id}", response_model=BikeOut)
 async def get_bike(bike_id: UUID, conn: Conn):
     row = await conn.fetchrow(
-        "SELECT id, rider_id, model, rated_top_speed_kmh, created_at "
-        "FROM bikes WHERE id = $1",
+        f"SELECT {BIKE_COLUMNS} FROM bikes WHERE id = $1",
         bike_id,
     )
     if row is None:

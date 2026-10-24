@@ -4,7 +4,9 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from typing import Literal
+
+from pydantic import BaseModel, Field, model_validator
 
 from .calibrations import CalibrationOut
 from .common import Strict
@@ -15,21 +17,44 @@ from .common import Strict
 
 class RiderIn(Strict):
     platform: Annotated[str, Field(max_length=32)] | None = None
+    phone_model: Annotated[str, Field(max_length=80)] | None = None
+    os_version: Annotated[str, Field(max_length=40)] | None = None
 
 
 class RiderOut(BaseModel):
     id: UUID
     platform: str | None
+    phone_model: str | None
+    os_version: str | None
     created_at: datetime
 
 
 # ---------------------------------------------------------------------- bikes
 
 
+TopSpeedSource = Literal["catalogue", "rider", "measured"]
+
+
 class BikeIn(Strict):
     rider_id: UUID
     model: Annotated[str, Field(min_length=2, max_length=80)]
     rated_top_speed_kmh: Annotated[float, Field(ge=40, le=420)]
+    catalogue_model_id: Annotated[str, Field(min_length=1, max_length=120)] | None = None
+    catalogue_version: Annotated[str, Field(min_length=1, max_length=40)] | None = None
+    other_make: Annotated[str, Field(min_length=1, max_length=40)] | None = None
+    other_model: Annotated[str, Field(min_length=1, max_length=60)] | None = None
+    other_year: Annotated[int, Field(ge=1950, le=2030)] | None = None
+    top_speed_source: TopSpeedSource = "rider"
+
+    @model_validator(mode="after")
+    def _catalogue_xor_other(self) -> "BikeIn":
+        if self.catalogue_model_id is not None and (
+            self.other_make is not None or self.other_model is not None
+        ):
+            raise ValueError(
+                "catalogue_model_id and other_make/other_model are mutually exclusive"
+            )
+        return self
 
 
 class BikeOut(BaseModel):
@@ -37,6 +62,12 @@ class BikeOut(BaseModel):
     rider_id: UUID
     model: str
     rated_top_speed_kmh: float
+    catalogue_model_id: str | None
+    catalogue_version: str | None
+    other_make: str | None
+    other_model: str | None
+    other_year: int | None
+    top_speed_source: str
     created_at: datetime
 
 

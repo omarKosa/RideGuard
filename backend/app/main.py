@@ -6,6 +6,7 @@ import asyncpg
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from .catalogue_sync import sync_catalogue
 from .db import create_pool, migrate
 from .routers import calibrations, incidents, riders, rides
 
@@ -20,6 +21,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         app.state.pool = await create_pool(dsn)
         await migrate(app.state.pool)
+        await sync_catalogue(app.state.pool)
         try:
             yield
         finally:

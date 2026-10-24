@@ -290,3 +290,47 @@ async def test_database_constraints_back_up_the_api(client, bike):
                    VALUES ($1, 0, now(), 50, 'gps', 95, 0, 0, 0, 0)""",
                 uuid.UUID(ride_id),
             )
+
+
+async def _put_bike(client, rider_id, **extra):
+    return await client.put(
+        f"/v1/bikes/{new_id()}",
+        json={"rider_id": rider_id, "model": "Suzuki GSX-S1000",
+              "rated_top_speed_kmh": 240, **extra},
+    )
+
+
+async def test_bike_with_catalogue_model(client, bike):
+    extra = {"catalogue_model_id": "suzuki-gsx-s1000-2021",
+             "catalogue_version": "2026-10-24", "top_speed_source": "catalogue"}
+    r = await _put_bike(client, bike["rider_id"], **extra)
+    assert r.status_code == 200, r.text
+    for k, v in extra.items():
+        assert r.json()[k] == v
+    assert r.json()["other_make"] is None
+
+
+async def test_bike_with_unknown_catalogue_id_is_accepted(client, bike):
+    r = await _put_bike(client, bike["rider_id"], catalogue_model_id="brand-new-2027")
+    assert r.status_code == 200, r.text
+    assert r.json()["top_speed_source"] == "rider"
+
+
+async def test_bike_other_fields_and_exclusivity(client, bike):
+    r = await _put_bike(client, bike["rider_id"], other_make="Foo",
+                        other_model="Bar 200", other_year=2019)
+    assert r.status_code == 200, r.text
+    assert r.json()["other_make"] == "Foo" and r.json()["other_year"] == 2019
+    r = await _put_bike(client, bike["rider_id"],
+                        catalogue_model_id="suzuki-gsx-s1000-2021", other_model="Bar")
+    assert r.status_code == 422
+
+
+async def test_rider_phone_fields(client):
+    rid = new_id()
+    r = await client.put(f"/v1/riders/{rid}", json={
+        "platform": "android", "phone_model": "SM-S918B", "os_version": "Android 15"})
+    assert r.status_code == 200, r.text
+    assert r.json()["phone_model"] == "SM-S918B"
+    assert r.json()["os_version"] == "Android 15"
+    assert (await client.get(f"/v1/riders/{rid}")).json()["os_version"] == "Android 15"
