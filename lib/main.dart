@@ -12,6 +12,7 @@ import 'data/remote_repository.dart';
 import 'data/sync_service.dart';
 import 'services/app_state.dart';
 import 'services/emergency_platform.dart';
+import 'services/phone_info.dart';
 import 'services/sensor_feed.dart';
 
 Future<void> main() async {
@@ -35,7 +36,11 @@ Future<void> main() async {
     api: api,
     store: FileOutboxStore(Directory('${docs.path}/outbox')),
   );
-  appState = AppState(store: store, remote: RemoteRepository(sync));
+  appState = AppState(
+    store: store,
+    remote: RemoteRepository(sync),
+    phoneInfo: readPhoneInfo,
+  );
   await appState.load();
   await sync.init();
 

@@ -12,17 +12,24 @@ import '../models/calibration_profile.dart';
 import '../models/emergency_contact.dart';
 import '../models/incident.dart';
 import '../models/ride_summary.dart';
+import 'phone_info.dart';
 
 enum StartupStep { bikeSetup, calibration, ready }
 
 /// Who is riding what, how the phone is calibrated, and user settings.
 class AppState extends ChangeNotifier {
-  AppState({required LocalStore store, required RemoteRepository remote})
-    : _store = store,
-      _remote = remote;
+  AppState({
+    required LocalStore store,
+    required RemoteRepository remote,
+    PhoneInfoReader? phoneInfo,
+  }) : _store = store,
+       _remote = remote,
+       _readPhone = phoneInfo ?? (() async => PhoneInfo.unknown);
 
   final LocalStore _store;
   final RemoteRepository _remote;
+  final PhoneInfoReader _readPhone;
+  PhoneInfo _phone = PhoneInfo.unknown;
   static const _uuid = Uuid();
 
   late String _riderId;
@@ -33,6 +40,7 @@ class AppState extends ChangeNotifier {
   SafetyBaseline? _safetyBaseline;
   String _apiUrl = AppConfig.defaultApiUrl;
 
+  PhoneInfo get phone => _phone;
   String get riderId => _riderId;
   BikeProfile? get bike => _bike;
   CalibrationProfile? get calibration => _calibration;
@@ -73,6 +81,11 @@ class AppState extends ChangeNotifier {
     _emergencyContact = _store.emergencyContact;
     _safetyBaseline = _store.safetyBaseline;
     _apiUrl = _store.apiUrl ?? AppConfig.defaultApiUrl;
+    try {
+      _phone = await _readPhone();
+    } catch (_) {
+      _phone = PhoneInfo.unknown;
+    }
     notifyListeners();
   }
 
@@ -99,7 +112,7 @@ class AppState extends ChangeNotifier {
           );
     _bike = bike;
     await _store.setBike(bike);
-    await _remote.upsertRider(_riderId);
+    await _remote.upsertRider(_riderId, _phone);
     await _remote.upsertBike(_riderId, bike);
     notifyListeners();
     return bike;

@@ -26,6 +26,7 @@ import 'package:ride_guard/models/bike_profile.dart';
 import 'package:ride_guard/models/incident.dart';
 import 'package:ride_guard/models/ride_summary.dart';
 import 'package:ride_guard/services/calibration_profile_builder.dart';
+import 'package:ride_guard/services/phone_info.dart';
 import 'package:ride_guard/services/ride_recorder.dart';
 import 'package:uuid/uuid.dart';
 
@@ -55,7 +56,7 @@ void main() {
       ratedTopSpeedKmh: 225,
       createdAt: DateTime.now(),
     );
-    await remote.upsertRider(riderId);
+    await remote.upsertRider(riderId, PhoneInfo.unknown);
     await remote.upsertBike(riderId, bike);
 
     // Sensor time is simulated, but timestamps must be "now" for the
@@ -204,7 +205,7 @@ void main() {
       ratedTopSpeedKmh: 200,
       createdAt: DateTime.now(),
     );
-    await remote.upsertRider(riderId);
+    await remote.upsertRider(riderId, PhoneInfo.unknown);
     await remote.upsertBike(riderId, bike);
 
     final sim = RideSimulator(mount: Mount.handlebarPortrait);

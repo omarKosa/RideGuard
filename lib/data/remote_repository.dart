@@ -5,6 +5,7 @@ import '../models/calibration_profile.dart';
 import '../models/incident.dart';
 import '../models/ride_sample.dart';
 import '../models/ride_summary.dart';
+import '../services/phone_info.dart';
 import 'sync_service.dart';
 
 /// Typed backend API. Every call is queued in the outbox, so callers never
@@ -14,11 +15,12 @@ class RemoteRepository {
 
   final SyncService _sync;
 
-  Future<void> upsertRider(String riderId) => _sync.enqueue(
-    'PUT',
-    '/v1/riders/$riderId',
-    {'platform': defaultTargetPlatform.name},
-  );
+  Future<void> upsertRider(String riderId, PhoneInfo phone) =>
+      _sync.enqueue('PUT', '/v1/riders/$riderId', {
+        'platform': defaultTargetPlatform.name,
+        'phone_model': _clip(phone.model, 80),
+        'os_version': _clip(phone.osVersion, 40),
+      });
 
   /// Backend caps other_make/other_model; the full text stays in `model`.
   static String? _clip(String? text, int max) {
