@@ -130,7 +130,8 @@ class TopSpeedField extends StatelessWidget {
   static String? validate(String? value) {
     final v = double.tryParse(value?.trim() ?? '');
     if (v == null) return 'Enter a speed in km/h';
-    if (v < BikeProfile.minTopSpeedKmh || v > BikeProfile.maxTopSpeedKmh) {
+    // Written so NaN fails too (every comparison with NaN is false).
+    if (!(v >= BikeProfile.minTopSpeedKmh && v <= BikeProfile.maxTopSpeedKmh)) {
       return 'Between ${BikeProfile.minTopSpeedKmh.toInt()} and '
           '${BikeProfile.maxTopSpeedKmh.toInt()} km/h';
     }

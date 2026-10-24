@@ -14,6 +14,7 @@ import 'package:ride_guard/screens/bike_setup/bike_setup_screen.dart';
 import 'package:ride_guard/screens/bike_setup/make_chips.dart';
 import 'package:ride_guard/screens/bike_setup/model_change_dialog.dart';
 import 'package:ride_guard/screens/bike_setup/model_list.dart';
+import 'package:ride_guard/screens/bike_setup/other_bike_form.dart';
 import 'package:ride_guard/screens/safety_briefing_screen.dart';
 import 'package:ride_guard/services/app_state.dart';
 import 'package:ride_guard/theme/app_theme.dart';
@@ -635,5 +636,17 @@ void main() {
         isFalse,
       );
     });
+  });
+
+  test('top speed must be a real number in range', () {
+    for (final bad in ['NaN', 'nan', 'Infinity', '-Infinity', '1e999', '']) {
+      expect(TopSpeedField.validate(bad), isNotNull, reason: bad);
+      expect(BikeSetupScreen.validateTopSpeed(bad), isNotNull, reason: bad);
+    }
+    expect(TopSpeedField.validate('39'), isNotNull);
+    expect(TopSpeedField.validate('421'), isNotNull);
+    expect(TopSpeedField.validate('40'), isNull);
+    expect(TopSpeedField.validate('214.5'), isNull);
+    expect(TopSpeedField.validate('420'), isNull);
   });
 }
