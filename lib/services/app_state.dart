@@ -89,10 +89,13 @@ class AppState extends ChangeNotifier {
             model: model.trim(),
             ratedTopSpeedKmh: ratedTopSpeedKmh,
             createdAt: DateTime.now(),
+            otherModel: model.trim(),
           )
         : existing.copyWith(
             model: model.trim(),
             ratedTopSpeedKmh: ratedTopSpeedKmh,
+            otherModel: model.trim(),
+            topSpeedSource: TopSpeedSource.rider,
           );
     _bike = bike;
     await _store.setBike(bike);

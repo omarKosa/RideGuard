@@ -25,6 +25,12 @@ class RemoteRepository {
         'rider_id': riderId,
         'model': bike.model,
         'rated_top_speed_kmh': bike.ratedTopSpeedKmh,
+        'catalogue_model_id': bike.catalogueModelId,
+        'catalogue_version': bike.catalogueVersion,
+        'other_make': bike.isOther ? bike.otherMake : null,
+        'other_model': bike.isOther ? (bike.otherModel ?? bike.model) : null,
+        'other_year': bike.isOther ? bike.otherYear : null,
+        'top_speed_source': bike.topSpeedSource.name,
       });
 
   Future<void> startRide({

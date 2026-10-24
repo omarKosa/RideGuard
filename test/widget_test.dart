@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -128,5 +130,42 @@ void main() {
     expect(find.text('START RIDE'), findsOneWidget);
     expect(find.textContaining('Ducati Monster'), findsOneWidget);
     expect(find.text('180'), findsOneWidget);
+  });
+
+  testWidgets('a legacy stored bike still opens on the home screen', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    addTearDown(tester.view.reset);
+    final cal = CalibrationProfile(
+      id: 'cal',
+      bikeId: 'legacy',
+      rideId: 'ride',
+      calibratedAt: DateTime.utc(2026, 10, 22),
+      params: FusionParams(mount: MountOrientation.provisional(Vec3.unitY)),
+      forwardFromMotion: true,
+      straightOffsetDeg: 2,
+      quality: 0.9,
+      achievedTopSpeedKmh: 180,
+    );
+    SharedPreferences.setMockInitialValues({
+      'bike': jsonEncode({
+        'id': 'legacy',
+        'model': 'Yamaha MT-07',
+        'rated_top_speed_kmh': 214,
+        'created_at': '2026-10-01T00:00:00Z',
+      }),
+    });
+    final (seed, _, _) = await buildApp();
+    await seed.saveCalibration(cal);
+
+    final (app, widget, _) = await buildApp();
+    expect(app.bike!.isOther, isTrue);
+    expect(app.bike!.otherModel, 'Yamaha MT-07');
+    expect(app.startupStep, StartupStep.ready);
+    await tester.pumpWidget(widget);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('START RIDE'), findsOneWidget);
+    expect(find.textContaining('Yamaha MT-07'), findsOneWidget);
   });
 }
