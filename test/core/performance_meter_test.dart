@@ -176,4 +176,38 @@ void main() {
     );
     expect((readings.toApiJson()['stops'] as List).length, 45);
   });
+
+  test('more than 50 stops: the 50 hardest are sent', () {
+    final t0 = DateTime.utc(2026);
+    // Stop i: from 40 km/h in (13 - i/10) s, so later stops are harder;
+    // the hardest of all comes first.
+    final stops = [
+      BrakeEvent(
+        startedAt: t0,
+        endedAt: t0.add(const Duration(seconds: 1)),
+        startSpeedKmh: 40,
+        distanceM: 5,
+        peakDecelMps2: 9,
+      ),
+      for (var i = 0; i < 60; i++)
+        BrakeEvent(
+          startedAt: t0,
+          endedAt: t0.add(Duration(milliseconds: 13000 - i * 100)),
+          startSpeedKmh: 40,
+          distanceM: 20,
+          peakDecelMps2: 4,
+        ),
+    ];
+    final sent =
+        (PerformanceReadings(stops: stops).toApiJson()['stops'] as List)
+            .cast<Map<String, dynamic>>();
+    expect(sent, hasLength(50));
+    final kept = [for (final s in sent) s['mean_decel_mps2'] as double];
+    final all = [
+      for (final s in stops) double.parse(s.meanDecelMps2.toStringAsFixed(2)),
+    ]..sort();
+    final hardest = all.reversed.take(50).toList()..sort();
+    expect([...kept]..sort(), hardest);
+    expect(kept.first, closeTo(11.11, 0.01)); // still in ride order
+  });
 }

@@ -70,15 +70,30 @@ class PerformanceReadings {
   /// so: stops the schema can't hold (rounded duration <= 0 or > 120 s,
   /// mean decel > 100 m/s2, i.e. clock steps or crash-like glitches) and
   /// stops that started at a GPS glitch ([plausibleStops]) are left out
-  /// before the 50-stop cap; peaks and top speed are clamped into
+  /// before the 50-stop cap (which keeps the hardest); peaks and top speed are clamped into
   /// range, keeping the direction of an extreme reading (the local check
   /// already judged the raw values). [toJson] keeps everything as measured.
   Map<String, dynamic> toApiJson() => {
     'sustained_top_speed_kmh': _clamped(sustainedTopSpeedKmh, maxApiSpeedKmh),
     'peak_accel_mps2': _clamped(peakAccelMps2, maxApiAccelMps2),
     'peak_decel_mps2': _clamped(peakDecelMps2, maxApiAccelMps2),
-    'stops': plausibleStops.map(_apiStop).nonNulls.take(maxApiStops).toList(),
+    'stops': _apiStops(),
   };
+
+  /// At most [maxApiStops], the hardest by mean deceleration (they are what
+  /// the braking check is about), in ride order.
+  List<Map<String, dynamic>> _apiStops() {
+    final valid = plausibleStops.map(_apiStop).nonNulls.toList();
+    if (valid.length <= maxApiStops) return valid;
+    final order = List.generate(valid.length, (i) => i)
+      ..sort(
+        (a, b) => (valid[b]['mean_decel_mps2'] as double).compareTo(
+          valid[a]['mean_decel_mps2'] as double,
+        ),
+      );
+    final kept = order.take(maxApiStops).toList()..sort();
+    return [for (final i in kept) valid[i]];
+  }
 
   static Map<String, dynamic>? _apiStop(BrakeEvent s) {
     final duration = _r2(s.durationS);
