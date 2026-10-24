@@ -20,6 +20,13 @@ class RemoteRepository {
     {'platform': defaultTargetPlatform.name},
   );
 
+  /// Backend caps other_make/other_model; the full text stays in `model`.
+  static String? _clip(String? text, int max) {
+    final t = text?.trim();
+    if (t == null || t.isEmpty) return null;
+    return t.length <= max ? t : t.substring(0, max).trimRight();
+  }
+
   Future<void> upsertBike(String riderId, BikeProfile bike) =>
       _sync.enqueue('PUT', '/v1/bikes/${bike.id}', {
         'rider_id': riderId,
@@ -27,8 +34,10 @@ class RemoteRepository {
         'rated_top_speed_kmh': bike.ratedTopSpeedKmh,
         'catalogue_model_id': bike.catalogueModelId,
         'catalogue_version': bike.catalogueVersion,
-        'other_make': bike.isOther ? bike.otherMake : null,
-        'other_model': bike.isOther ? (bike.otherModel ?? bike.model) : null,
+        'other_make': bike.isOther ? _clip(bike.otherMake, 40) : null,
+        'other_model': bike.isOther
+            ? _clip(bike.otherModel ?? bike.model, 60)
+            : null,
         'other_year': bike.isOther ? bike.otherYear : null,
         'top_speed_source': bike.topSpeedSource.name,
       });
