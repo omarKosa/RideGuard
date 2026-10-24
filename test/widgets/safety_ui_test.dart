@@ -17,7 +17,7 @@ import 'package:ride_guard/models/emergency_contact.dart';
 import 'package:ride_guard/models/incident.dart';
 import 'package:ride_guard/models/ride_summary.dart';
 import 'package:ride_guard/screens/ride_summary_screen.dart';
-import 'package:ride_guard/screens/settings_screen.dart';
+import 'package:ride_guard/screens/settings/settings_screen.dart';
 import 'package:ride_guard/services/app_state.dart';
 import 'package:ride_guard/services/emergency_platform.dart';
 import 'package:ride_guard/services/safety_controller.dart';

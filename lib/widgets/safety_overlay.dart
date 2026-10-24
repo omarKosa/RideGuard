@@ -8,6 +8,7 @@ import '../models/incident.dart';
 import '../services/safety_controller.dart';
 import '../theme/app_theme.dart';
 import 'common.dart';
+import 'key_value_rows.dart';
 
 /// Puts the crash alert over [child] and warnings on top of it, driven by
 /// the [SafetyController] above it.
@@ -222,28 +223,7 @@ class SafetyLearningSummary extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (final (k, v) in rows)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 3),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    k,
-                    style: AppText.body(15, color: AppColors.textMuted),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Text(
-                    v,
-                    textAlign: TextAlign.end,
-                    style: AppText.body(15, weight: FontWeight.w700),
-                  ),
-                ),
-              ],
-            ),
-          ),
+        KeyValueRows(rows: rows, valueSize: 15),
         if (showWarnings)
           for (final w in tuning.warnings) ...[
             const SizedBox(height: 8),

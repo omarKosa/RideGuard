@@ -8,9 +8,9 @@ import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/sync_indicator.dart';
 import 'bike_setup_screen.dart';
-import 'ride_screen.dart';
+import 'ride/ride_screen.dart';
 import 'safety_briefing_screen.dart';
-import 'settings_screen.dart';
+import 'settings/settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});

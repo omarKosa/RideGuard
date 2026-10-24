@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/calibration/calibration_session.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
-import 'calibration_screen.dart';
+import 'calibration/calibration_screen.dart';
 
 /// Explains the init ride and makes the rider acknowledge the risks before
 /// the top-speed task.
