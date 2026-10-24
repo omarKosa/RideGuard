@@ -11,6 +11,7 @@ import '../core/safety/safety_baseline.dart';
 import '../core/safety/safety_monitor.dart';
 import '../core/safety/safety_tuning.dart';
 import '../models/calibration_profile.dart';
+import '../models/incident.dart';
 import '../models/model_check.dart';
 import '../models/ride_summary.dart';
 import 'app_state.dart';
@@ -57,6 +58,7 @@ class CalibrationController extends ChangeNotifier {
   CalibrationProfile? _result;
   CalibrationTask? _lastTask;
   CalibrationPhase _phase = CalibrationPhase.idle;
+  List<Incident>? _reviewed;
   bool _finishing = false;
   bool _disposed = false;
 
@@ -72,6 +74,13 @@ class CalibrationController extends ChangeNotifier {
   /// against the bike's model when the result is accepted.
   InitReadings? get initReadings => _initReadings;
   CalibrationPhase get phase => _phase;
+
+  /// Alerts raised during the init ride, with the rider's answers once
+  /// [finishReview] has been called.
+  List<Incident> get incidents => _reviewed ?? _safety?.incidents ?? const [];
+
+  /// The rider went through (or skipped) the alert cards.
+  bool get alertsReviewed => _reviewed != null;
 
   /// Sensors are live (starting up or recording).
   bool get running =>
@@ -92,6 +101,7 @@ class CalibrationController extends ChangeNotifier {
     );
     _lastTask = _session!.current;
     _result = null;
+    _reviewed = null;
     _meter = PerformanceMeter();
     _initReadings = null;
     _recorder = RideRecorder(
@@ -200,6 +210,24 @@ class CalibrationController extends ChangeNotifier {
     );
     final readings = _initReadings;
     if (readings != null) await _app.recordInitRide(result, readings);
+  }
+
+  /// The rider's answer on an init-ride alert: learned into the pending
+  /// baseline (saved on [accept]) and uploaded.
+  Future<Incident> labelIncident(Incident incident, RiderLabel label) async {
+    final labelled = incident.labelled(label, _clock());
+    final id = _result?.id;
+    final base =
+        _safetyBaseline ??
+        (id == null ? null : SafetyBaseline(calibrationId: id));
+    _safetyBaseline = base?.withLabel(labelled);
+    await _app.remote.saveIncident(labelled);
+    return labelled;
+  }
+
+  void finishReview(List<Incident> incidents) {
+    _reviewed = List.unmodifiable(incidents);
+    _notify();
   }
 
   CalibrationProfile? _buildProfile(RideSummary? summary) {

@@ -149,6 +149,17 @@ void main() {
     r.safety.dispose();
   });
 
+  testWidgets('ending the ride takes the warning banner down', (tester) async {
+    final r = await _rig();
+    r.safety.report(_hazard(HazardKind.wobble));
+    expect(r.safety.warning, isNotNull);
+    r.safety.end();
+    // It would cover the alert cards after the init ride.
+    expect(r.safety.warning, isNull);
+    expect(r.platform.alarmUrgent, isNull);
+    r.safety.dispose();
+  });
+
   testWidgets('a crash takes over from a warning and is not interrupted', (
     tester,
   ) async {

@@ -264,7 +264,7 @@ void main() {
     now = now.add(const Duration(seconds: 30));
     await remote.saveIncident(crash.resolve(IncidentOutcome.called, now));
     // The rider says the wobble was road buzz.
-    await remote.saveIncident(incidents.first.markedFalseAlarm());
+    await remote.saveIncident(incidents.first.labelled(RiderLabel.no, now));
     final noise = monitor.takeNoise();
     await recorder.finish(safetyStats: noise.toApiJson(SafetyTuning.defaults));
 
@@ -280,10 +280,13 @@ void main() {
     expect(stored.map((i) => i['kind']), ['wobble', 'impact', 'crash']);
     expect(stored[0]['wobble_hz'] as num, closeTo(7, 1));
     expect(stored[0]['outcome'], 'warned');
+    expect(stored[0]['rider_label'], 'no');
+    expect(stored[0]['labelled_at'], isNotNull);
     expect(stored[0]['false_alarm'], isTrue);
     expect(stored[0]['wobble_rms'] as num, greaterThan(1));
     expect(stored[2]['outcome'], 'called');
     expect(stored[2]['speed_kmh'] as num, greaterThan(20));
+    expect(stored[2]['rider_label'], isNull);
     expect(stored[2]['false_alarm'], isFalse);
 
     final ride = await get('/v1/rides/${recorder.rideId}');

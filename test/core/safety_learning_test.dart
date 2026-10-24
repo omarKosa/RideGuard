@@ -7,6 +7,7 @@ import 'package:ride_guard/core/math/vec3.dart';
 import 'package:ride_guard/core/safety/safety_baseline.dart';
 import 'package:ride_guard/core/safety/safety_monitor.dart';
 import 'package:ride_guard/core/safety/safety_tuning.dart';
+import 'package:ride_guard/models/incident.dart';
 
 import '../support/ride_simulator.dart';
 
@@ -157,6 +158,47 @@ void main() {
       expect(base.withFalseLean(80).tuning.extremeLeanDeg, 65);
       expect(base.withFalseWobble(3).tuning.wobbleMinRms, 1.0);
       expect(base.withFalseWobble(0.6).withFalseImpact(5).falseAlarms, 2);
+    });
+
+    Incident labelled(HazardKind kind, RiderLabel label) => Incident(
+      id: 'i',
+      rideId: 'r',
+      kind: kind,
+      detectedAt: DateTime.utc(2026, 10, 24, 9),
+      speedKmh: 90,
+      leanDeg: -58,
+      peakAccelG: 4.6,
+      wobbleHz: 8,
+      wobbleRms: 0.62,
+      outcome: kind.critical
+          ? IncidentOutcome.cancelled
+          : IncidentOutcome.warned,
+    ).labelled(label, DateTime.utc(2026, 10, 24, 10));
+
+    test('no on a crash never loosens anything', () {
+      final base = SafetyBaseline(calibrationId: 'c').withRide(_noise(600));
+      final after = base.withLabel(labelled(HazardKind.crash, RiderLabel.no));
+      expect(after, same(base));
+      expect(after.falseAlarms, 0);
+      expect(after.tuning.impactG, SafetyTuning.defaultImpactG);
+      expect(after.tuning.wobbleMinRms, SafetyTuning.defaultWobbleRms);
+      expect(after.tuning.extremeLeanDeg, SafetyTuning.defaultExtremeLeanDeg);
+    });
+
+    test('no on a wobble raises the wobble threshold ×1.15', () {
+      final base = SafetyBaseline(calibrationId: 'c').withRide(_noise(600));
+      final w = base.withLabel(labelled(HazardKind.wobble, RiderLabel.no));
+      expect(w.tuning.wobbleMinRms, closeTo(0.62 * 1.15, 1e-9));
+      expect(w.tuning.impactG, SafetyTuning.defaultImpactG);
+      expect(w.falseAlarms, 1);
+      final i = base.withLabel(labelled(HazardKind.impact, RiderLabel.no));
+      expect(i.tuning.impactG, closeTo(4.6 * 1.1, 1e-9));
+      final l = base.withLabel(labelled(HazardKind.extremeLean, RiderLabel.no));
+      expect(l.tuning.extremeLeanDeg, 61);
+      // "It happened" teaches nothing about thresholds.
+      for (final kind in HazardKind.values) {
+        expect(base.withLabel(labelled(kind, RiderLabel.yes)), same(base));
+      }
     });
 
     test('a slow sensor limits the wobble band and says so', () {

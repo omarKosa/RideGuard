@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 
+import '../../models/incident.dart';
+import 'safety_monitor.dart';
 import 'safety_tuning.dart';
 
 /// Log-spaced histogram: quantiles of a value in a few dozen numbers, so a
@@ -192,7 +194,7 @@ class RideNoise {
 /// * wobble = 3 × floor of wobble-band oscillation
 /// * impact = 1.25 × floor of per-second peak acceleration
 ///
-/// Warnings the rider marked as false alarms push the matching threshold
+/// Warnings the rider said did not happen push the matching threshold
 /// just above that event. Cancelled crashes are only counted: "I'm OK"
 /// doesn't mean it wasn't a crash, so crash detection never loosens.
 class SafetyBaseline {
@@ -315,6 +317,22 @@ class SafetyBaseline {
     falseLeanDeg: math.max(falseLeanDeg ?? 0, leanDeg.abs()),
     falseAlarms: falseAlarms + 1,
   );
+
+  /// Learns from the rider's answer on [i]: NO on a warning raises that
+  /// threshold just above the event. Crashes and YES change nothing.
+  SafetyBaseline withLabel(Incident i) {
+    if (i.riderLabel != RiderLabel.no) return this;
+    return switch (i.kind) {
+      HazardKind.wobble when i.wobbleRms != null => withFalseWobble(
+        i.wobbleRms!,
+      ),
+      HazardKind.impact when i.peakAccelG != null => withFalseImpact(
+        i.peakAccelG!,
+      ),
+      HazardKind.extremeLean => withFalseLean(i.leanDeg),
+      _ => this,
+    };
+  }
 
   SafetyTuning get tuning {
     final warnings = <String>[];

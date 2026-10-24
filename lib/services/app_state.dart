@@ -4,7 +4,6 @@ import 'package:uuid/uuid.dart';
 import '../config/app_config.dart';
 import '../core/catalogue/spec_check.dart';
 import '../core/safety/safety_baseline.dart';
-import '../core/safety/safety_monitor.dart';
 import '../core/safety/safety_tuning.dart';
 import '../data/bike_catalogue.dart';
 import '../data/local_store.dart';
@@ -303,26 +302,20 @@ class AppState extends ChangeNotifier {
     );
   }
 
-  /// The rider says [incident] was not real: detection on this mount gets
-  /// just less sensitive than that event, and the label is uploaded.
-  Future<Incident> markFalseAlarm(Incident incident) async {
-    final marked = incident.markedFalseAlarm();
+  /// The rider's answer on a ride's alert: NO on a warning makes detection
+  /// on this mount just less sensitive than that event (never on a crash);
+  /// the answer is uploaded either way.
+  Future<Incident> labelIncident(Incident incident, RiderLabel label) async {
+    final labelled = incident.labelled(label, DateTime.now());
     final calibration = _calibration;
     if (calibration != null) {
       final base =
           safetyBaseline ?? SafetyBaseline(calibrationId: calibration.id);
-      final updated = switch (incident.kind) {
-        HazardKind.wobble when incident.wobbleRms != null =>
-          base.withFalseWobble(incident.wobbleRms!),
-        HazardKind.impact when incident.peakAccelG != null =>
-          base.withFalseImpact(incident.peakAccelG!),
-        HazardKind.extremeLean => base.withFalseLean(incident.leanDeg),
-        _ => base,
-      };
-      await saveSafetyBaseline(updated);
+      final updated = base.withLabel(labelled);
+      if (!identical(updated, base)) await saveSafetyBaseline(updated);
     }
-    await _remote.saveIncident(marked);
-    return marked;
+    await _remote.saveIncident(labelled);
+    return labelled;
   }
 
   /// Back to default sensitivity; learning starts again from the next ride.

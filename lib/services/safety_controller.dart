@@ -200,11 +200,17 @@ class SafetyController extends ChangeNotifier {
     _notify();
   }
 
-  /// The ride is over. Stopping the ride proves the rider is OK.
+  /// The ride is over. Stopping the ride proves the rider is OK. The
+  /// warning banner goes too: it would cover what comes next.
   void end() {
     dismiss();
     _alertTimer?.cancel();
-    if (_warning != null) unawaited(_platform.stopAlarm());
+    _bannerTimer?.cancel();
+    if (_warning != null) {
+      unawaited(_platform.stopAlarm());
+      _warning = null;
+      _notify();
+    }
     _rideId = null;
   }
 

@@ -8,6 +8,7 @@ import 'package:ride_guard/models/bike_choice.dart';
 import 'package:ride_guard/models/bike_profile.dart';
 import 'package:ride_guard/models/calibration_profile.dart';
 import 'package:ride_guard/models/emergency_contact.dart';
+import 'package:ride_guard/models/incident.dart';
 import 'package:ride_guard/services/app_state.dart';
 import 'package:ride_guard/services/calibration_controller.dart';
 import 'package:ride_guard/services/phone_info.dart';
@@ -202,10 +203,14 @@ void main() {
     final source = FakeSensorSource();
     final mount = Mount.euler(70, 35, -110);
     final pipe = _SourcePipe(source);
+    final safety = SafetyController(
+      app: app,
+      platform: FakeEmergencyPlatform(),
+    );
     final cal = CalibrationController(
       app: app,
       feed: SensorFeed(source, clock: () => pipe.t),
-      safety: SafetyController(app: app, platform: FakeEmergencyPlatform()),
+      safety: safety,
       keepAwake: (_) async {},
     );
     await tester.runAsync(cal.start);
@@ -224,6 +229,16 @@ void main() {
     for (var i = 0; i < 4; i++) {
       await drive(() => sim.cruise(pipe, 1));
     }
+    safety.report(
+      const Hazard(
+        kind: HazardKind.wobble,
+        t: 1,
+        speedKmh: 90,
+        leanDeg: 1,
+        wobbleHz: 8,
+        wobbleRms: 0.62,
+      ),
+    );
     await tester.runAsync(() async {
       while (cal.phase == CalibrationPhase.running) {
         cal.skip();
@@ -233,9 +248,29 @@ void main() {
     });
     expect(cal.phase, CalibrationPhase.finished);
     final result = cal.result!;
+    // The rider answers the init ride's alert on its card.
+    expect(cal.alertsReviewed, isFalse);
+    final wobble = cal.incidents.single;
+    final labelled = (await tester.runAsync(
+      () => cal.labelIncident(wobble, RiderLabel.no),
+    ))!;
+    expect(labelled.riderLabel, RiderLabel.no);
+    cal.finishReview([labelled]);
+    expect(cal.alertsReviewed, isTrue);
+    expect(cal.incidents.single.riderLabel, RiderLabel.no);
+    // Learned only once the calibration is saved.
+    expect(app.safetyBaseline, isNull);
     await tester.runAsync(cal.accept);
+    expect(app.safetyBaseline!.falseAlarms, 1);
+    expect(app.safetyTuning.wobbleMinRms, closeTo(0.62 * 1.15, 1e-9));
     cal.dispose();
+    safety.dispose();
     await tester.runAsync(stack.sync.flush);
+    final wobbleUpload = stack.backend
+        .bodiesFor('PUT', '/incidents/${wobble.id}')
+        .last;
+    expect(wobbleUpload['rider_label'], 'no');
+    expect(wobbleUpload['labelled_at'], isNotNull);
 
     final paths = stack.backend.requests.map((r) => r.url.path).toList();
     final calAt = paths.indexOf('/v1/calibrations/${result.id}');

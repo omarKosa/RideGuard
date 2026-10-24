@@ -10,6 +10,7 @@ import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
 import '../../widgets/gauges.dart';
 import '../../widgets/safety_overlay.dart';
+import '../alert_review_screen.dart';
 import '../ride_summary_screen.dart';
 import 'hold_to_stop_button.dart';
 import 'ride_header.dart';
@@ -57,12 +58,20 @@ class _RideViewState extends State<_RideView> {
     setState(() => _stopping = true);
     final summary = await context.read<RideController>().stop();
     if (!mounted) return;
-    final incidents = context.read<SafetyController>().incidents;
+    final navigator = Navigator.of(context);
     if (summary == null) {
-      Navigator.of(context).pop();
+      navigator.pop();
       return;
     }
-    Navigator.of(context).pushReplacement(
+    // The safety controller has ended: nothing re-uploads these incidents
+    // after the rider labels them.
+    final incidents = await reviewAlerts(
+      navigator,
+      context.read<SafetyController>().incidents,
+      context.read<AppState>().labelIncident,
+    );
+    if (!mounted) return;
+    navigator.pushReplacement(
       MaterialPageRoute<void>(
         builder: (_) =>
             RideSummaryScreen(summary: summary, incidents: incidents),

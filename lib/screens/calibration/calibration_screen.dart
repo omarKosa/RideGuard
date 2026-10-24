@@ -7,6 +7,7 @@ import '../../services/emergency_platform.dart';
 import '../../services/safety_controller.dart';
 import '../../services/sensor_feed.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/alert_review.dart';
 import '../../widgets/common.dart';
 import '../../widgets/safety_overlay.dart';
 import 'result_view.dart';
@@ -39,8 +40,15 @@ class CalibrationScreen extends StatelessWidget {
   }
 }
 
-class _CalibrationView extends StatelessWidget {
+class _CalibrationView extends StatefulWidget {
   const _CalibrationView();
+
+  @override
+  State<_CalibrationView> createState() => _CalibrationViewState();
+}
+
+class _CalibrationViewState extends State<_CalibrationView> {
+  final _review = GlobalKey<AlertReviewState>();
 
   Future<void> _confirmAbort(BuildContext context) async {
     final controller = context.read<CalibrationController>();
@@ -69,11 +77,22 @@ class _CalibrationView extends StatelessWidget {
     final c = context.watch<CalibrationController>();
     final result = c.result;
     final session = c.session;
+    // Alerts from the init ride are asked about before the result.
+    final reviewing =
+        c.phase == CalibrationPhase.finished &&
+        !c.alertsReviewed &&
+        c.incidents.isNotEmpty;
 
     final Widget body = switch (c.phase) {
       CalibrationPhase.running when session != null => RunningView(
         controller: c,
         session: session,
+      ),
+      _ when reviewing => AlertReview(
+        key: _review,
+        incidents: c.incidents,
+        onLabel: c.labelIncident,
+        onDone: c.finishReview,
       ),
       CalibrationPhase.finished when result != null => ResultView(
         result: result,
@@ -84,27 +103,37 @@ class _CalibrationView extends StatelessWidget {
     };
 
     return PopScope(
-      canPop: !c.running,
+      canPop: !c.running && !reviewing,
       onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        // Back on the cards is SKIP.
+        if (reviewing) return _review.currentState?.skip();
         final alerting =
             context.read<SafetyController>().phase != SafetyPhase.idle;
-        if (!didPop && !alerting) _confirmAbort(context);
+        if (!alerting) _confirmAbort(context);
       },
       child: SafetyLayer(
         child: Scaffold(
-          appBar: AppBar(
-            title: const Text('INIT RIDE'),
-            automaticallyImplyLeading: !c.running,
-            actions: [
-              if (c.running)
-                TextButton.icon(
-                  onPressed: () => _confirmAbort(context),
-                  icon: const Icon(Icons.close, color: AppColors.textMuted),
-                  label: Text('STOP', style: AppText.label(13)),
+          appBar: reviewing
+              ? null
+              : AppBar(
+                  title: const Text('INIT RIDE'),
+                  automaticallyImplyLeading: !c.running,
+                  actions: [
+                    if (c.running)
+                      TextButton.icon(
+                        onPressed: () => _confirmAbort(context),
+                        icon: const Icon(
+                          Icons.close,
+                          color: AppColors.textMuted,
+                        ),
+                        label: Text('STOP', style: AppText.label(13)),
+                      ),
+                  ],
                 ),
-            ],
+          body: GradientBackground(
+            child: SafeArea(top: reviewing, child: body),
           ),
-          body: GradientBackground(child: SafeArea(top: false, child: body)),
         ),
       ),
     );

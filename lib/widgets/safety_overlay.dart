@@ -46,22 +46,38 @@ class SafetyLayer extends StatelessWidget {
   }
 }
 
+/// The measured strength of a warning (Hz, g or degrees); null on crashes.
+String? hazardMeasure(Incident i) => switch (i.kind) {
+  HazardKind.wobble => '${i.wobbleHz?.toStringAsFixed(1) ?? '?'} Hz',
+  HazardKind.impact => '${i.peakAccelG?.toStringAsFixed(1) ?? '?'} g',
+  HazardKind.extremeLean => '${i.leanDeg.abs().toStringAsFixed(0)}°',
+  HazardKind.crash => null,
+};
+
 String describeWarning(Incident i) {
   final speed = '${i.speedKmh.toStringAsFixed(0)} km/h';
+  final measure = hazardMeasure(i);
   return switch (i.kind) {
     HazardKind.wobble =>
-      'Speed wobble at $speed '
-          '(${i.wobbleHz?.toStringAsFixed(1) ?? '?'} Hz). Ease off the '
-          'throttle smoothly, keep a light grip on the bars.',
+      'Speed wobble at $speed ($measure). Ease off the throttle smoothly, '
+          'keep a light grip on the bars.',
     HazardKind.impact =>
-      'Hard impact (${i.peakAccelG?.toStringAsFixed(1) ?? '?'} g) at '
-          '$speed. Check tyres and wheels when safe.',
+      'Hard impact ($measure) at $speed. Check tyres and wheels when safe.',
     HazardKind.extremeLean =>
-      'Extreme lean (${i.leanDeg.abs().toStringAsFixed(0)}°) at $speed. '
-          'You are near the limit of grip.',
+      'Extreme lean ($measure) at $speed. You are near the limit of grip.',
     HazardKind.crash => 'Crash detected.',
   };
 }
+
+/// What came of a crash alert, for the rider.
+String crashOutcomeText(IncidentOutcome o) => switch (o) {
+  IncidentOutcome.cancelled => 'you cancelled',
+  IncidentOutcome.called => 'contact called',
+  IncidentOutcome.dialerOpened => 'dialer opened',
+  IncidentOutcome.callFailed => 'call failed',
+  IncidentOutcome.noContact => 'no contact set',
+  IncidentOutcome.pending || IncidentOutcome.warned => 'pending',
+};
 
 class _CrashAlert extends StatelessWidget {
   const _CrashAlert({required this.safety});

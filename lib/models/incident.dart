@@ -26,6 +26,9 @@ enum IncidentOutcome {
   final String apiName;
 }
 
+/// The rider's answer to "Did this really happen?" after the ride.
+enum RiderLabel { yes, no }
+
 /// A detected hazard, as stored and uploaded.
 class Incident {
   const Incident({
@@ -42,8 +45,9 @@ class Incident {
     this.latitude,
     this.longitude,
     this.resolvedAt,
-    this.falseAlarm = false,
-  });
+    this.riderLabel,
+    this.labelledAt,
+  }) : assert((riderLabel == null) == (labelledAt == null));
 
   factory Incident.fromHazard({
     required String id,
@@ -81,13 +85,16 @@ class Incident {
   final IncidentOutcome outcome;
   final DateTime? resolvedAt;
 
-  /// The rider said this warning was not real. Never set on crashes.
-  final bool falseAlarm;
+  /// What the rider answered after the ride; null when not asked or
+  /// skipped. On a crash it is data only: it never loosens detection.
+  final RiderLabel? riderLabel;
+  final DateTime? labelledAt;
 
   Incident _copy({
     IncidentOutcome? outcome,
     DateTime? resolvedAt,
-    bool? falseAlarm,
+    RiderLabel? riderLabel,
+    DateTime? labelledAt,
   }) => Incident(
     id: id,
     rideId: rideId,
@@ -102,16 +109,16 @@ class Incident {
     longitude: longitude,
     outcome: outcome ?? this.outcome,
     resolvedAt: resolvedAt ?? this.resolvedAt,
-    falseAlarm: falseAlarm ?? this.falseAlarm,
+    riderLabel: riderLabel ?? this.riderLabel,
+    labelledAt: labelledAt ?? this.labelledAt,
   );
 
   Incident resolve(IncidentOutcome outcome, DateTime at) =>
       _copy(outcome: outcome, resolvedAt: at);
 
-  Incident markedFalseAlarm() {
-    if (kind.critical) throw StateError('Crashes cannot be false alarms');
-    return _copy(falseAlarm: true);
-  }
+  /// The rider's answer, given at [at].
+  Incident labelled(RiderLabel label, DateTime at) =>
+      _copy(riderLabel: label, labelledAt: at);
 
   static const _kindApiNames = {
     HazardKind.crash: 'crash',
@@ -136,7 +143,10 @@ class Incident {
     'longitude': longitude,
     'outcome': outcome.apiName,
     'resolved_at': resolvedAt?.toUtc().toIso8601String(),
-    'false_alarm': falseAlarm,
+    // Always both or neither; an upload without them clears a stored
+    // label, so every copy uploaded after labelling must carry it.
+    'rider_label': riderLabel?.name,
+    'labelled_at': labelledAt?.toUtc().toIso8601String(),
   };
 }
 
