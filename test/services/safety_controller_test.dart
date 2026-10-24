@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ride_guard/core/safety/motion_clip.dart';
 import 'package:ride_guard/core/safety/safety_monitor.dart';
 import 'package:ride_guard/data/local_store.dart';
 import 'package:ride_guard/models/emergency_contact.dart';
@@ -182,6 +183,59 @@ void main() {
     // Hazards after the ride are ignored.
     r.safety.report(_hazard(HazardKind.crash));
     expect(r.safety.phase, SafetyPhase.idle);
+    r.safety.dispose();
+  });
+
+  testWidgets('clips upload against their incident', (tester) async {
+    final r = await _rig();
+    const rideId = '8f4c6c36-1f0c-4a8e-9a43-1f6f0e0c7a11';
+    const clip = MotionClip(
+      rateHz: 50,
+      startOffsetS: -5,
+      accel: [
+        [-5, 0.1, 0.2, 9.8],
+        [-4.98, 0.1, 0.2, 9.81],
+      ],
+      gyro: [
+        [-5, 0.01, 0.02, 0.03],
+      ],
+    );
+    final wobble = _hazard(HazardKind.wobble);
+    final crash = _hazard(HazardKind.crash);
+    final suppressed = _hazard(HazardKind.crash);
+    r.safety.report(wobble);
+    r.safety.report(crash);
+    r.safety.report(suppressed); // second crash: no incident
+    final ids = [for (final i in r.safety.incidents) i.id];
+
+    r.safety.reportClip(wobble, clip);
+    r.safety.reportClip(suppressed, clip); // dropped
+    // A clip flushed at ride end still belongs to that ride.
+    r.safety.end();
+    r.safety.reportClip(crash, clip);
+    r.safety.reportClip(crash, clip); // one clip per incident
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+
+    final clipPaths = [
+      for (final q in r.backend.requests)
+        if (q.url.path.endsWith('/clip')) '${q.method} ${q.url.path}',
+    ];
+    expect(clipPaths, [
+      'PUT /v1/rides/$rideId/incidents/${ids[0]}/clip',
+      'PUT /v1/rides/$rideId/incidents/${ids[1]}/clip',
+    ]);
+    // The incident is sent before its clip.
+    final paths = [for (final q in r.backend.requests) q.url.path];
+    expect(
+      paths.indexOf('/v1/rides/$rideId/incidents/${ids[0]}'),
+      lessThan(paths.indexOf('/v1/rides/$rideId/incidents/${ids[0]}/clip')),
+    );
+    final body = r.backend.bodiesFor('PUT', '/clip').first;
+    expect(body['rate_hz'], 50);
+    expect(body['start_offset_s'], -5);
+    expect(body['accel'], hasLength(2));
+    expect(body['gyro'].single, [-5, 0.01, 0.02, 0.03]);
     r.safety.dispose();
   });
 

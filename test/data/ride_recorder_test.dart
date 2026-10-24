@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ride_guard/core/fusion/motion_pipeline.dart';
 import 'package:ride_guard/models/ride_summary.dart';
@@ -34,7 +36,9 @@ void main() {
       sim.turn(p, 35, 8, onTick: tick);
       sim.brakeToStop(p, decel: 7, onTick: tick);
       sim.still(p, 2, onTick: tick);
-      final summary = await recorder.finish();
+      final summary = await recorder.finish(
+        performance: {'sustained_top_speed_kmh': 80.0, 'stops': []},
+      );
       await s.sync.flush();
 
       final header = s.backend.bodiesFor('PUT', RegExp(r'/v1/rides/ride-1$'));
@@ -80,6 +84,13 @@ void main() {
             as num,
         closeTo(80, 4),
       );
+      expect(posted['performance']['sustained_top_speed_kmh'], 80);
+
+      // Kept with the last ride on the phone.
+      final stored = RideSummary.fromJson(
+        jsonDecode(jsonEncode(summary.toJson())) as Map<String, dynamic>,
+      );
+      expect(stored.performance, summary.performance);
     },
   );
 }

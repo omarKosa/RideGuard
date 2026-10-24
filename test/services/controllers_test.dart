@@ -164,6 +164,19 @@ void main() {
           .bodiesFor('PUT', '/v1/rides/${summary.rideId}/summary')
           .single;
       expect(rideSummary['safety_stats']['imu_hz'], isNotNull);
+      expect(rideSummary['safety_stats']['bands'], isA<List<dynamic>>());
+      // What the bike did on this ride, for later analysis.
+      expect(
+        rideSummary['performance']['sustained_top_speed_kmh'],
+        closeTo(50, 5),
+      );
+      expect(rideSummary['performance']['stops'], isA<List<dynamic>>());
+      expect(app.lastRide!.performance, rideSummary['performance']);
+      // The init ride's summary carries its readings too.
+      final calSummary = stack.backend
+          .bodiesFor('PUT', '/v1/rides/${result.rideId}/summary')
+          .single;
+      expect(calSummary['performance'], isA<Map<String, dynamic>>());
     },
   );
 
@@ -348,5 +361,20 @@ void main() {
         .where((b) => b['kind'] == 'crash')
         .map((b) => b['outcome']);
     expect(crashes, ['pending', 'called']);
+
+    // The ride stopped within 5 s of the crash: its clip still went out,
+    // cut short, after the incident it belongs to.
+    final crashId = safety.incidents
+        .firstWhere((i) => i.kind == HazardKind.crash)
+        .id;
+    final paths = stack.backend.requests.map((r) => r.url.path).toList();
+    final incidentPath = '/v1/rides/${summary.rideId}/incidents/$crashId';
+    final clipAt = paths.indexOf('$incidentPath/clip');
+    expect(clipAt, greaterThan(paths.indexOf(incidentPath)));
+    final clip = stack.backend.bodiesFor('PUT', '$incidentPath/clip').single;
+    expect(clip['start_offset_s'], -5);
+    final accel = (clip['accel'] as List).cast<List<dynamic>>();
+    expect(accel.last[0] as num, lessThan(5));
+    expect(accel.length, greaterThan(100));
   });
 }

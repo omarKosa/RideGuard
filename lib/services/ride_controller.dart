@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
+import '../core/analysis/performance_meter.dart';
 import '../core/analysis/ride_analyzer.dart';
 import '../core/fusion/motion_pipeline.dart';
 import '../core/safety/safety_monitor.dart';
@@ -43,6 +44,7 @@ class RideController extends ChangeNotifier {
 
   RideRecorder? _recorder;
   SafetyMonitor? _monitor;
+  PerformanceMeter _meter = PerformanceMeter();
   SafetyTuning _tuning = SafetyTuning.defaults;
   CalibrationProfile? _calibration;
   MotionState? _state;
@@ -96,6 +98,7 @@ class RideController extends ChangeNotifier {
     _totals = const RideStats();
     _chart = const [];
     _lastBrake = null;
+    _meter = PerformanceMeter();
     _ticks = 0;
     await recorder.start();
     _riding = true;
@@ -105,7 +108,11 @@ class RideController extends ChangeNotifier {
     _tuning = _app.safetyTuning;
     _monitor = safety == null
         ? null
-        : SafetyMonitor.tuned(_tuning, onHazard: safety.report);
+        : SafetyMonitor.tuned(
+            _tuning,
+            onHazard: safety.report,
+            onClip: safety.reportClip,
+          );
     await _feed.start(
       MotionPipeline(params: calibration.params),
       _onTick,
@@ -118,8 +125,12 @@ class RideController extends ChangeNotifier {
     final recorder = _recorder;
     if (recorder == null || !_riding) return;
     _state = s;
+    _meter.add(s);
     final brake = recorder.record(s);
-    if (brake != null) _lastBrake = brake;
+    if (brake != null) {
+      _lastBrake = brake;
+      _meter.addStop(brake);
+    }
     // Full-window analysis once a second; live values every tick.
     if (_ticks++ % 10 == 0 || brake != null) _refreshAnalysis();
     _notify();
@@ -138,15 +149,19 @@ class RideController extends ChangeNotifier {
     if (!_riding || recorder == null) return null;
     _riding = false;
     await _feed.stop();
+    // Before end(): delivers the clips of the last seconds (queued after
+    // their incidents) while the ride is still current.
+    final noise = _monitor?.takeNoise();
+    // After the flush; resolves a running countdown as cancelled.
     _safety?.end();
     unawaited(_keepAwake(false));
     // Every ride teaches the app what normal riding looks like here.
-    final noise = _monitor?.takeNoise();
     if (noise != null) {
       await _app.learnFromRide(noise, incidents: _safety?.incidents ?? []);
     }
     final summary = await recorder.finish(
       safetyStats: noise?.toApiJson(_tuning),
+      performance: _meter.readings.toApiJson(),
     );
     await _app.setLastRide(summary);
     _notify();

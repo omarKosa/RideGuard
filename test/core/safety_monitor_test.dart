@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ride_guard/core/fusion/motion_pipeline.dart';
 import 'package:ride_guard/core/math/vec3.dart';
+import 'package:ride_guard/core/safety/motion_clip.dart';
 import 'package:ride_guard/core/safety/safety_monitor.dart';
 
 import '../support/ride_simulator.dart';
@@ -9,7 +10,11 @@ import '../support/ride_simulator.dart';
 /// raw IMU at full rate, processed state at 10 Hz.
 class _Monitored extends MotionPipeline {
   final hazards = <Hazard>[];
-  late final monitor = SafetyMonitor(onHazard: hazards.add);
+  final clips = <(Hazard, MotionClip)>[];
+  late final monitor = SafetyMonitor(
+    onHazard: hazards.add,
+    onClip: (h, c) => clips.add((h, c)),
+  );
   double _nextUpdate = 0;
 
   List<HazardKind> get kinds => [for (final h in hazards) h.kind];
@@ -142,5 +147,89 @@ void main() {
     final (p, sim) = _rideAt(20, Mount.handlebarPortrait);
     sim.wobble(p, 7, 3, 2);
     expect(p.hazards, isEmpty);
+  });
+
+  test('wobble produces a 10 s clip around it', () {
+    final (p, sim) = _rideAt(110, Mount.handlebarPortrait);
+    sim.wobble(p, 7, 3, 2);
+    sim.cruise(p, 10);
+    final (hazard, clip) = p.clips.single;
+    expect(hazard, same(p.hazards.single));
+    expect(clip.startOffsetS, -5);
+    expect(clip.rateHz, closeTo(50, 1));
+    expect(clip.accel.length, inInclusiveRange(490, 510));
+    expect(clip.gyro.length, inInclusiveRange(490, 510));
+    expect(clip.accel.first[0], closeTo(-5, 0.05));
+    expect(clip.accel.last[0], closeTo(5, 0.05));
+    expect(clip.accel.first, hasLength(4));
+    // Raw accelerometer: gravity is in there.
+    expect(Vec3.fromList(clip.accel.first.sublist(1)).length, closeTo(9.8, 1));
+
+    final body = clip.toApiJson();
+    expect(
+      body.keys,
+      unorderedEquals(['rate_hz', 'start_offset_s', 'accel', 'gyro']),
+    );
+    expect(body['start_offset_s'], -5);
+    expect((body['accel'] as List).length, lessThanOrEqualTo(1500));
+  });
+
+  test('ride ending right after a hazard flushes a truncated clip', () {
+    final (p, sim) = _rideAt(110, Mount.handlebarPortrait);
+    sim.wobble(p, 7, 3, 2);
+    sim.cruise(p, 1);
+    expect(p.hazards, hasLength(1));
+    expect(p.clips, isEmpty);
+
+    p.monitor.takeNoise();
+    final (hazard, clip) = p.clips.single;
+    expect(hazard, same(p.hazards.single));
+    expect(clip.startOffsetS, -5);
+    expect(clip.accel.last[0], inExclusiveRange(1, 2.5));
+    expect(clip.gyro.last[0], lessThanOrEqualTo(2.5));
+
+    // Delivered once.
+    p.monitor.takeNoise();
+    expect(p.clips, hasLength(1));
+  });
+
+  test('a clip early in the ride starts where the data does', () {
+    final rec = ClipRecorder();
+    for (var i = 0; i <= 100; i++) {
+      final t = 10 + i * 0.02;
+      rec.addAccel(const Vec3(0, 0, 9.81), t);
+      rec.addGyro(const Vec3(0.1, 0, 0), t);
+    }
+    const h = Hazard(kind: HazardKind.impact, t: 11, speedKmh: 40, leanDeg: 0);
+    rec.capture(h);
+    expect(rec.poll(12), isEmpty);
+    final (hazard, clip) = rec.flush().single;
+    expect(hazard, same(h));
+    expect(clip.startOffsetS, closeTo(-1, 1e-9));
+    expect(clip.accel.first[0], closeTo(-1, 1e-9));
+    expect(clip.accel.last[0], closeTo(1, 1e-9));
+    expect(rec.flush(), isEmpty);
+  });
+
+  test('a fast sensor is thinned to fit the upload limit', () {
+    final rec = ClipRecorder();
+    const h = Hazard(kind: HazardKind.impact, t: 20, speedKmh: 40, leanDeg: 0);
+    var captured = false;
+    final done = <(Hazard, MotionClip)>[];
+    for (var i = 0; i < 30 * 400; i++) {
+      final t = i / 400;
+      rec.addAccel(Vec3(0.123456789, 0, 9.81), t);
+      rec.addGyro(const Vec3(0, 0, 0.5), t);
+      if (!captured && t >= 20) {
+        rec.capture(h);
+        captured = true;
+      }
+      done.addAll(rec.poll(t));
+    }
+    final clip = done.single.$2;
+    expect(clip.accel.length, inInclusiveRange(1000, 1500));
+    expect(clip.gyro.length, inInclusiveRange(1000, 1500));
+    expect(clip.rateHz, closeTo(clip.accel.length / 10, 5));
+    expect(clip.accel.first[1], 0.1235);
   });
 }

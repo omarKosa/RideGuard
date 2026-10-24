@@ -4,6 +4,7 @@ import '../fusion/estimators.dart';
 import '../fusion/motion_pipeline.dart';
 import '../fusion/mount_orientation.dart';
 import '../math/vec3.dart';
+import 'motion_clip.dart';
 import 'safety_baseline.dart';
 import 'safety_tuning.dart';
 import 'wobble_detector.dart';
@@ -71,10 +72,12 @@ class Hazard {
 /// or one that is still lying down never re-triggers.
 ///
 /// It also records what normal riding looks like ([takeNoise]) so the
-/// thresholds can be learned per bike and mount (see [SafetyBaseline]).
+/// thresholds can be learned per bike and mount (see [SafetyBaseline]),
+/// and, with [onClip], the raw motion around every hazard it reports.
 class SafetyMonitor {
   SafetyMonitor({
     required this.onHazard,
+    this.onClip,
     this.impactG = SafetyTuning.defaultImpactG,
     this.armSpeedKmh = 15,
     this.ridingSpeedKmh = 10,
@@ -92,14 +95,17 @@ class SafetyMonitor {
     this.warningCooldown = 10.0,
     this.noiseMinSpeedKmh = 20,
     WobbleDetector? wobble,
-  }) : _wobble = wobble ?? WobbleDetector();
+  }) : _wobble = wobble ?? WobbleDetector(),
+       _clips = onClip == null ? null : ClipRecorder();
 
   /// A monitor using thresholds learned for this bike and mount.
   factory SafetyMonitor.tuned(
     SafetyTuning tuning, {
     required void Function(Hazard hazard) onHazard,
+    void Function(Hazard hazard, MotionClip clip)? onClip,
   }) => SafetyMonitor(
     onHazard: onHazard,
+    onClip: onClip,
     impactG: tuning.impactG,
     extremeLeanDeg: tuning.extremeLeanDeg,
     wobble: WobbleDetector(
@@ -109,6 +115,10 @@ class SafetyMonitor {
   );
 
   final void Function(Hazard hazard) onHazard;
+
+  /// Raw IMU from 5 s before to 5 s after each reported hazard, delivered
+  /// once complete (or cut short by [takeNoise] at the end of the ride).
+  final void Function(Hazard hazard, MotionClip clip)? onClip;
 
   /// Total acceleration (g) that counts as an impact.
   final double impactG;
@@ -149,16 +159,20 @@ class SafetyMonitor {
   final double noiseMinSpeedKmh;
 
   final WobbleDetector _wobble;
+  final ClipRecorder? _clips;
 
   /// Seconds around a hazard that are left out of the statistics, so a
   /// real wobble never teaches the app that wobbles are normal.
   static const _quietMargin = 5.0;
   RideNoise _noise = RideNoise();
-  final List<(int, double, double)> _pendingSeconds = [];
+  final List<_Second> _pendingSeconds = [];
   final List<int> _gyroPerSecond = [];
   int? _second;
   double _secWobble = 0;
   double _secPeakG = 0;
+  double _secPeakRms = -1;
+  double _secHz = 0;
+  double? _secSpeedKmh;
   int _secGyro = 0;
   bool _secRiding = false;
   bool _secExcluded = false;
@@ -191,6 +205,11 @@ class SafetyMonitor {
   void addAccel(Vec3 accel, double t) {
     if (!accel.isFinite) return;
     _rollSecond(t);
+    final clips = _clips;
+    if (clips != null) {
+      clips.addAccel(accel, t);
+      _deliver(clips.poll(t));
+    }
     final dt = _lastAccelT == null
         ? 0.02
         : (t - _lastAccelT!).clamp(0.001, 0.2).toDouble();
@@ -217,8 +236,17 @@ class SafetyMonitor {
   void addGyro(Vec3 rate, double t, double dt) {
     if (!rate.isFinite) return;
     _rollSecond(t);
+    final clips = _clips;
+    if (clips != null) {
+      clips.addGyro(rate, t);
+      _deliver(clips.poll(t));
+    }
     _secGyro++;
     final wobbling = _wobble.add(rate, t, dt);
+    if (_wobble.rms > _secPeakRms) {
+      _secPeakRms = _wobble.rms;
+      _secHz = _wobble.frequencyHz;
+    }
     if (_wobble.frequencyHz >= _wobble.minHz &&
         _wobble.frequencyHz <= _wobble.maxHz) {
       _secWobble = math.max(_secWobble, _wobble.rms);
@@ -248,6 +276,7 @@ class SafetyMonitor {
   void update(MotionState s, MountOrientation? mount) {
     _state = s;
     final t = s.t;
+    _secSpeedKmh = s.speedKmh;
     if (s.speedReliable && s.speedKmh >= noiseMinSpeedKmh) {
       _secRiding = true;
     } else {
@@ -332,31 +361,39 @@ class SafetyMonitor {
     if (!kind.critical && last != null && t - last < warningCooldown) return;
     _lastEmitted[kind] = t;
     final s = _state;
-    onHazard(
-      Hazard(
-        kind: kind,
-        t: t,
-        speedKmh: speedKmh ?? s?.speedKmh ?? 0,
-        leanDeg: s?.leanDeg ?? 0,
-        peakAccelG: peakAccelG,
-        wobbleHz: wobbleHz,
-        wobbleRms: wobbleRms,
-        latitude: s?.lastFix?.latitude,
-        longitude: s?.lastFix?.longitude,
-      ),
+    final hazard = Hazard(
+      kind: kind,
+      t: t,
+      speedKmh: speedKmh ?? s?.speedKmh ?? 0,
+      leanDeg: s?.leanDeg ?? 0,
+      peakAccelG: peakAccelG,
+      wobbleHz: wobbleHz,
+      wobbleRms: wobbleRms,
+      latitude: s?.lastFix?.latitude,
+      longitude: s?.lastFix?.longitude,
     );
+    // Only hazards actually reported get a clip.
+    _clips?.capture(hazard);
+    onHazard(hazard);
+  }
+
+  void _deliver(List<(Hazard, MotionClip)> clips) {
+    final onClip = this.onClip;
+    if (onClip == null) return;
+    for (final (hazard, clip) in clips) {
+      onClip(hazard, clip);
+    }
   }
 
   // ------------------------------------------------- normal-riding statistics
 
   /// Normal-riding statistics gathered since the last call. Call when the
-  /// ride ends.
+  /// ride ends: first delivers the clips still being recorded, cut short.
   RideNoise takeNoise() {
+    final clips = _clips;
+    if (clips != null) _deliver(clips.flush());
     _rollSecond(double.infinity);
-    for (final second in _pendingSeconds) {
-      _noise.wobbleRms.add(second.$2);
-      _noise.peakG.add(second.$3);
-    }
+    _pendingSeconds.forEach(_learn);
     _pendingSeconds.clear();
     final counts = List.of(_gyroPerSecond)..sort();
     final noise = RideNoise(
@@ -364,6 +401,7 @@ class SafetyMonitor {
       peakG: _noise.peakG,
       // Median: the first and last seconds are partial.
       imuHz: counts.length < 5 ? null : counts[counts.length ~/ 2].toDouble(),
+      bands: _noise.bands,
     );
     _noise = RideNoise();
     _gyroPerSecond.clear();
@@ -379,27 +417,73 @@ class SafetyMonitor {
       if (_secGyro > 0) _gyroPerSecond.add(_secGyro);
       final usable =
           _secRiding && !_secExcluded && current >= _lastHazardT + _quietMargin;
-      if (usable) _pendingSeconds.add((current, _secWobble, _secPeakG));
+      if (usable) {
+        _pendingSeconds.add(
+          _Second(
+            current,
+            wobble: _secWobble,
+            peakG: _secPeakG,
+            hz: _secHz,
+            band: SpeedBand.of(_secSpeedKmh ?? 0),
+          ),
+        );
+      }
     }
     _second = second;
     _secWobble = 0;
     _secPeakG = 0;
+    _secPeakRms = -1;
+    _secHz = 0;
+    _secSpeedKmh = null;
     _secGyro = 0;
     _secRiding = false;
     _secExcluded = false;
     if (second == null) return;
     // Seconds far enough back can no longer be near a hazard.
     while (_pendingSeconds.isNotEmpty &&
-        _pendingSeconds.first.$1 + 1 <= second - _quietMargin) {
-      final s = _pendingSeconds.removeAt(0);
-      _noise.wobbleRms.add(s.$2);
-      _noise.peakG.add(s.$3);
+        _pendingSeconds.first.second + 1 <= second - _quietMargin) {
+      _learn(_pendingSeconds.removeAt(0));
+    }
+  }
+
+  void _learn(_Second s) {
+    _noise.wobbleRms.add(s.wobble);
+    _noise.peakG.add(s.peakG);
+    final band = s.band;
+    if (band != null) {
+      _noise.bands
+          .putIfAbsent(band, BandNoise.new)
+          .add(wobble: s.wobble, hz: s.hz, g: s.peakG);
     }
   }
 
   void _excludeAround(double t) {
     _lastHazardT = math.max(_lastHazardT, t);
     _secExcluded = true;
-    _pendingSeconds.removeWhere((s) => s.$1 + 1 >= t - _quietMargin);
+    _pendingSeconds.removeWhere((s) => s.second + 1 >= t - _quietMargin);
   }
+}
+
+/// One usable second of normal riding, held back until it can no longer be
+/// near a hazard.
+class _Second {
+  const _Second(
+    this.second, {
+    required this.wobble,
+    required this.peakG,
+    required this.hz,
+    required this.band,
+  });
+
+  final int second;
+
+  /// Strongest wobble-band oscillation, rad/s RMS.
+  final double wobble;
+  final double peakG;
+
+  /// Oscillation frequency at the second's strongest rotation.
+  final double hz;
+
+  /// From the latest speed in the second.
+  final SpeedBand? band;
 }

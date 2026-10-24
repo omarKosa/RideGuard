@@ -83,6 +83,7 @@ class RideRecorder {
   Future<RideSummary> finish({
     RideStatus status = RideStatus.completed,
     Map<String, dynamic>? safetyStats,
+    Map<String, dynamic>? performance,
   }) async {
     final now = _clock();
     _flush(now);
@@ -99,6 +100,7 @@ class RideRecorder {
       mountRealignments: _realignments,
       sampleCount: _seq,
       safetyStats: safetyStats,
+      performance: performance,
     );
     await _remote.finishRide(summary);
     return summary;

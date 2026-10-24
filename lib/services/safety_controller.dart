@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
 import '../config/app_config.dart';
+import '../core/safety/motion_clip.dart';
 import '../core/safety/safety_monitor.dart';
 import '../models/emergency_contact.dart';
 import '../models/incident.dart';
@@ -31,7 +32,8 @@ enum SafetyPhase {
 /// * Crash: looping alarm and a [countdown] the rider can cancel; when it
 ///   runs out the emergency contact is called.
 ///
-/// Every incident is uploaded through the offline outbox.
+/// Every incident is uploaded through the offline outbox, followed by the
+/// raw motion around it ([reportClip]).
 class SafetyController extends ChangeNotifier {
   SafetyController({
     required AppState app,
@@ -66,6 +68,11 @@ class SafetyController extends ChangeNotifier {
   Timer? _alertTimer;
   Timer? _bannerTimer;
   final List<Incident> _incidents = [];
+
+  /// Where each reported hazard's clip goes. Keeps the ride too: clips cut
+  /// short at the end of the ride arrive after [end].
+  final Map<Hazard, ({String rideId, String incidentId})> _clipTargets =
+      Map.identity();
   bool _disposed = false;
 
   SafetyPhase get phase => _phase;
@@ -80,7 +87,10 @@ class SafetyController extends ChangeNotifier {
   EmergencyContact? get contact => _app.emergencyContact;
 
   /// Starts attributing hazards to [rideId].
-  void begin(String rideId) => _rideId = rideId;
+  void begin(String rideId) {
+    _rideId = rideId;
+    _clipTargets.clear();
+  }
 
   /// Handles a hazard from the [SafetyMonitor].
   void report(Hazard hazard) {
@@ -99,6 +109,19 @@ class SafetyController extends ChangeNotifier {
     } else {
       _warn(incident);
     }
+    _clipTargets[hazard] = (rideId: rideId, incidentId: incident.id);
+  }
+
+  /// Uploads the raw motion around [hazard] (the very object passed to
+  /// [report]) against its incident. Queued after the incident, so the
+  /// backend has it first. A hazard that made no incident has nowhere to
+  /// go and its clip is dropped; each incident gets one clip.
+  void reportClip(Hazard hazard, MotionClip clip) {
+    final target = _clipTargets.remove(hazard);
+    if (target == null) return;
+    unawaited(
+      _app.remote.saveIncidentClip(target.rideId, target.incidentId, clip),
+    );
   }
 
   void _warn(Incident incident) {

@@ -108,7 +108,9 @@ class CalibrationController extends ChangeNotifier {
     // app, so crash detection runs here too.
     final safety = _safety?..begin(_recorder!.rideId);
     // Possibly a new mount: start from default sensitivity.
-    _monitor = safety == null ? null : SafetyMonitor(onHazard: safety.report);
+    _monitor = safety == null
+        ? null
+        : SafetyMonitor(onHazard: safety.report, onClip: safety.reportClip);
     _noise = null;
     _safetyBaseline = null;
     await _feed.start(pipeline, _onTick, safety: _monitor);
@@ -173,12 +175,15 @@ class CalibrationController extends ChangeNotifier {
 
   Future<RideSummary?> _stop(RideStatus status) async {
     await _feed.stop();
+    // Before end(): delivers the clips of the last seconds (queued after
+    // their incidents) while the ride is still current.
+    final noise = _noise = _monitor?.takeNoise();
     _safety?.end();
     unawaited(_keepAwake(false));
-    final noise = _noise = _monitor?.takeNoise();
     return _recorder?.finish(
       status: status,
       safetyStats: noise?.toApiJson(SafetyTuning.defaults),
+      performance: _meter?.readings.toApiJson(),
     );
   }
 

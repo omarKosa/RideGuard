@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../core/safety/motion_clip.dart';
 import '../models/bike_profile.dart';
 import '../models/calibration_profile.dart';
 import '../models/incident.dart';
@@ -78,6 +79,17 @@ class RemoteRepository {
     'PUT',
     '/v1/rides/${incident.rideId}/incidents/${incident.id}',
     incident.toApiJson(),
+  );
+
+  /// Raw motion around an incident; the incident must already be queued.
+  Future<void> saveIncidentClip(
+    String rideId,
+    String incidentId,
+    MotionClip clip,
+  ) => _sync.enqueue(
+    'PUT',
+    '/v1/rides/$rideId/incidents/$incidentId/clip',
+    clip.toApiJson(),
   );
 
   /// Upsert by id; the calibration and init ride must already be queued.

@@ -19,6 +19,7 @@ class RideSummary {
     required this.mountRealignments,
     required this.sampleCount,
     this.safetyStats,
+    this.performance,
   });
 
   factory RideSummary.fromJson(Map<String, dynamic> json) {
@@ -49,6 +50,7 @@ class RideSummary {
       mountRealignments: json['mount_realignments'] as int,
       sampleCount: json['sample_count'] as int,
       safetyStats: json['safety_stats'] as Map<String, dynamic>?,
+      performance: json['performance'] as Map<String, dynamic>?,
     );
   }
 
@@ -70,6 +72,10 @@ class RideSummary {
 
   /// Normal-riding statistics and the safety thresholds used on this ride.
   final Map<String, dynamic>? safetyStats;
+
+  /// What the bike did (`PerformanceReadings.toApiJson`): sustained top
+  /// speed, peak acceleration and braking, stops.
+  final Map<String, dynamic>? performance;
 
   Duration get duration => endedAt.difference(startedAt);
 
@@ -97,6 +103,7 @@ class RideSummary {
     'window': _statsJson(window),
     'brake_events': [for (final e in brakeEvents) e.toJson()],
     if (safetyStats != null) 'safety_stats': safetyStats,
+    if (performance != null) 'performance': performance,
   };
 
   Map<String, dynamic> toJson() => {

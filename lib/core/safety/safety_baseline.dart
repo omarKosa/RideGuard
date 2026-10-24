@@ -72,13 +72,67 @@ class Histogram {
   };
 }
 
+/// Speed ranges normal riding is broken down by when uploaded.
+enum SpeedBand {
+  b20to40('20-40'),
+  b40to60('40-60'),
+  b60to90('60-90'),
+  b90to120('90-120'),
+  b120plus('120+');
+
+  const SpeedBand(this.apiName);
+
+  final String apiName;
+
+  /// The band [kmh] falls in; null below 20 km/h (or not a number).
+  static SpeedBand? of(double kmh) {
+    if (!(kmh >= 20)) return null;
+    if (kmh < 40) return b20to40;
+    if (kmh < 60) return b40to60;
+    if (kmh < 90) return b60to90;
+    if (kmh < 120) return b90to120;
+    return b120plus;
+  }
+}
+
+/// Normal riding within one [SpeedBand]: one value per second.
+class BandNoise {
+  BandNoise({Histogram? wobbleRms, Histogram? wobbleHz, Histogram? peakG})
+    : wobbleRms = wobbleRms ?? Histogram.wobble(),
+      wobbleHz = wobbleHz ?? Histogram(min: 0.5, max: 25),
+      peakG = peakG ?? Histogram.accel();
+
+  /// Strongest wobble-band oscillation in each second.
+  final Histogram wobbleRms;
+
+  /// Oscillation frequency (Hz) at each second's strongest rotation.
+  final Histogram wobbleHz;
+
+  /// Strongest jolt in each second.
+  final Histogram peakG;
+
+  double get seconds => wobbleRms.total;
+
+  void add({required double wobble, required double hz, required double g}) {
+    wobbleRms.add(wobble);
+    wobbleHz.add(hz);
+    peakG.add(g);
+  }
+}
+
 /// What normal riding looked like during one ride: one value per second of
 /// steady riding, away from any hazard.
 class RideNoise {
-  RideNoise({Histogram? wobbleRms, Histogram? peakG, this.imuHz})
-    : wobbleRms = wobbleRms ?? Histogram.wobble(),
-      peakG = peakG ?? Histogram.accel();
+  RideNoise({
+    Histogram? wobbleRms,
+    Histogram? peakG,
+    this.imuHz,
+    Map<SpeedBand, BandNoise>? bands,
+  }) : wobbleRms = wobbleRms ?? Histogram.wobble(),
+       peakG = peakG ?? Histogram.accel(),
+       bands = bands ?? {};
 
+  /// Bands are upload-only: a stored ride comes back without them.
   factory RideNoise.fromJson(Map<String, dynamic> json) => RideNoise(
     wobbleRms: Histogram.fromJson(json['wobble_rms'] as Map<String, dynamic>),
     peakG: Histogram.fromJson(json['peak_g'] as Map<String, dynamic>),
@@ -94,6 +148,10 @@ class RideNoise {
   /// Gyroscope samples per second actually delivered by this phone.
   final double? imuHz;
 
+  /// The same seconds, split by speed (for later analysis; thresholds use
+  /// the ride-wide histograms).
+  final Map<SpeedBand, BandNoise> bands;
+
   double get ridingSeconds => wobbleRms.total;
 
   /// Per-ride summary uploaded with the ride.
@@ -103,8 +161,20 @@ class RideNoise {
     'peak_g_p99': _r(peakG.quantile(0.99)),
     'imu_hz': _r(imuHz),
     ...tuning.toApiJson(),
+    'bands': [
+      for (final band in SpeedBand.values)
+        if (bands[band] case final b? when b.seconds > 0)
+          {
+            'band': band.apiName,
+            'seconds': b.seconds.round(),
+            'wobble_rms': b.wobbleRms.toJson(),
+            'wobble_hz': b.wobbleHz.toJson(),
+            'peak_g': b.peakG.toJson(),
+          },
+    ],
   };
 
+  /// Local storage (the safety baseline); leaves out [bands].
   Map<String, dynamic> toJson() => {
     'wobble_rms': wobbleRms.toJson(),
     'peak_g': peakG.toJson(),

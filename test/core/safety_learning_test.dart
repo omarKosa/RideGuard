@@ -243,5 +243,66 @@ void main() {
       ], reason: 'defaults: the rough patch is a false alarm');
       expect(rideWith(tuning), [HazardKind.wobble]);
     });
+
+    test('bands split normal riding by speed', () {
+      final p = _Monitored();
+      final sim = RideSimulator(mount: Mount.handlebarPortrait);
+      sim.still(p, 5);
+      p.captureStillReference();
+      sim.accelerateTo(p, 50);
+      sim.cruise(p, 60);
+      sim.accelerateTo(p, 100);
+      sim.cruise(p, 60);
+      sim.brakeToStop(p);
+      expect(p.hazards, isEmpty);
+
+      final noise = p.monitor.takeNoise();
+      final slow = noise.bands[SpeedBand.b40to60]!;
+      final fast = noise.bands[SpeedBand.b90to120]!;
+      // 60 s cruising plus the ~2 s of accelerating through each band.
+      expect(slow.wobbleRms.total, inInclusiveRange(50, 65));
+      expect(fast.wobbleRms.total, inInclusiveRange(50, 65));
+      expect(slow.peakG.total, slow.wobbleRms.total);
+      expect(slow.wobbleHz.total, slow.wobbleRms.total);
+      expect(noise.bands[SpeedBand.b120plus], isNull);
+      // Every band second is also in the ride-wide histograms.
+      final inBands = noise.bands.values.fold(
+        0.0,
+        (s, b) => s + b.wobbleRms.total,
+      );
+      expect(inBands, noise.ridingSeconds);
+
+      final api = noise.toApiJson(SafetyTuning.defaults);
+      final bands = (api['bands'] as List).cast<Map<String, dynamic>>();
+      expect(bands.length, lessThanOrEqualTo(5));
+      final b = bands.firstWhere((b) => b['band'] == '40-60');
+      expect(b['seconds'], slow.wobbleRms.total.round());
+      expect(b['wobble_hz']['min'], 0.5);
+      expect(b['wobble_hz']['max'], 25);
+      for (final key in ['wobble_rms', 'wobble_hz', 'peak_g']) {
+        final h = b[key] as Map<String, dynamic>;
+        expect(h['min'], greaterThan(0));
+        expect(h['max'], greaterThan(h['min'] as num));
+        expect((h['counts'] as List).length, lessThanOrEqualTo(100));
+      }
+      // Upload-only: the stored baseline is unchanged.
+      expect(noise.toJson().keys, ['wobble_rms', 'peak_g', 'imu_hz']);
+      // Valid JSON.
+      jsonEncode(api);
+    });
+
+    test('speed bands', () {
+      expect(SpeedBand.of(19.9), isNull);
+      expect(SpeedBand.of(20), SpeedBand.b20to40);
+      expect(SpeedBand.of(40), SpeedBand.b40to60);
+      expect(SpeedBand.of(89.9), SpeedBand.b60to90);
+      expect(SpeedBand.of(119), SpeedBand.b90to120);
+      expect(SpeedBand.of(300), SpeedBand.b120plus);
+      expect(SpeedBand.of(double.nan), isNull);
+      expect(
+        [for (final b in SpeedBand.values) b.apiName],
+        ['20-40', '40-60', '60-90', '90-120', '120+'],
+      );
+    });
   });
 }
