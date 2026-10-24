@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:ride_guard/core/safety/safety_monitor.dart';
 import 'package:ride_guard/models/incident.dart';
+import 'package:ride_guard/widgets/alert_card.dart';
 import 'package:ride_guard/widgets/alert_review.dart';
 
 Incident _incident(String id, HazardKind kind) => Incident(
@@ -93,6 +94,59 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect((done())!.single.riderLabel, RiderLabel.yes);
+  });
+
+  testWidgets('a tap throws the card off with its stamp, once', (tester) async {
+    final done = await pumpReview(tester, incidents);
+    await tester.pumpAndSettle();
+    final start = tester.getCenter(find.byKey(const Key('alert-card')));
+
+    await tester.tap(find.byKey(const Key('alert-yes')));
+    await tester.pump(); // the animation starts
+    await tester.pump(const Duration(milliseconds: 120));
+    // Mid-flight: still the first card, tilted, stamped, moving right.
+    expect(find.text('ALERT 1 OF 3'), findsOneWidget);
+    expect(find.text('IT HAPPENED'), findsOneWidget);
+    expect(find.byType(AlertCard), findsOneWidget);
+    final card = tester.getCenter(find.byType(AlertCard));
+    expect(card.dx, greaterThan(start.dx + 50));
+    // Taps during the flight are ignored.
+    await tester.tap(find.byKey(const Key('alert-no')), warnIfMissed: false);
+    await tester.tap(find.byKey(const Key('alert-yes')), warnIfMissed: false);
+    await tester.pumpAndSettle();
+
+    expect(find.text('ALERT 2 OF 3'), findsOneWidget);
+    expect(find.text('HARD IMPACT'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('alert-skip')));
+    await tester.pumpAndSettle();
+    expect(done()!.map((i) => i.riderLabel), [RiderLabel.yes, null, null]);
+  });
+
+  testWidgets('NO flies left with the NOT REAL stamp', (tester) async {
+    final done = await pumpReview(tester, incidents.take(1).toList());
+    await tester.pumpAndSettle();
+    final start = tester.getCenter(find.byKey(const Key('alert-card')));
+    await tester.tap(find.byKey(const Key('alert-no')));
+    await tester.pump(); // the animation starts
+    await tester.pump(const Duration(milliseconds: 120));
+    expect(find.text('NOT REAL'), findsOneWidget);
+    expect(
+      tester.getCenter(find.byType(AlertCard)).dx,
+      lessThan(start.dx - 50),
+    );
+    await tester.pumpAndSettle();
+    expect(done()!.single.riderLabel, RiderLabel.no);
+  });
+
+  testWidgets('skip mid-flight keeps the answer being thrown', (tester) async {
+    final done = await pumpReview(tester, incidents);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('alert-no')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tap(find.byKey(const Key('alert-skip')));
+    await tester.pumpAndSettle();
+    expect(done()!.map((i) => i.riderLabel), [RiderLabel.no, null, null]);
   });
 
   testWidgets('skip leaves the rest unlabelled', (tester) async {

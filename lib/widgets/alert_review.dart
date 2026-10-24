@@ -27,7 +27,8 @@ class AlertReview extends StatefulWidget {
   State<AlertReview> createState() => AlertReviewState();
 }
 
-class AlertReviewState extends State<AlertReview> {
+class AlertReviewState extends State<AlertReview>
+    with SingleTickerProviderStateMixin {
   late final List<Incident> _incidents = List.of(widget.incidents);
   int _index = 0;
   bool _done = false;
@@ -38,6 +39,15 @@ class AlertReviewState extends State<AlertReview> {
   /// Swipe progress of the current card: positive towards YES.
   double _drag = 0;
 
+  /// A tapped answer throws the card off like a swipe would.
+  late final AnimationController _fly = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 250),
+  )..addListener(() => setState(() => _drag = _flyingTo * _fly.value));
+
+  /// +1 towards YES, -1 towards NO, 0 while no card is flying.
+  double _flyingTo = 0;
+
   @override
   void initState() {
     super.initState();
@@ -45,6 +55,26 @@ class AlertReviewState extends State<AlertReview> {
     if (_incidents.isEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _finish());
     }
+  }
+
+  @override
+  void dispose() {
+    _fly.dispose();
+    super.dispose();
+  }
+
+  Future<void> _tap(RiderLabel label) async {
+    if (_done || _flyingTo != 0 || _index >= _incidents.length) return;
+    _flyingTo = label == RiderLabel.yes ? 1 : -1;
+    try {
+      await _fly.forward(from: 0).orCancel;
+    } on TickerCanceled {
+      return;
+    }
+    if (!mounted) return;
+    _flyingTo = 0;
+    _fly.value = 0;
+    _answer(label);
   }
 
   void _answer(RiderLabel label) {
@@ -67,8 +97,17 @@ class AlertReviewState extends State<AlertReview> {
     if (_index == _incidents.length) _finish();
   }
 
-  /// Ends the review now; alerts not answered yet stay unlabelled.
-  void skip() => _finish();
+  /// Ends the review now; alerts not answered yet stay unlabelled. A card
+  /// already flying off keeps its answer.
+  void skip() {
+    if (_flyingTo != 0) {
+      final label = _flyingTo > 0 ? RiderLabel.yes : RiderLabel.no;
+      _fly.stop();
+      _flyingTo = 0;
+      _answer(label);
+    }
+    _finish();
+  }
 
   Future<void> _finish() async {
     if (_done) return;
@@ -105,7 +144,7 @@ class AlertReviewState extends State<AlertReview> {
           ),
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 12),
-            child: _Dots(count: n, on: _index + 1),
+            child: AlertDots(count: n, on: _index + 1),
           ),
           Expanded(
             child: KeyedSubtree(
@@ -114,6 +153,9 @@ class AlertReviewState extends State<AlertReview> {
               child: _SlideIn(
                 child: Dismissible(
                   key: const Key('alert-card'),
+                  direction: _flyingTo != 0
+                      ? DismissDirection.none
+                      : DismissDirection.horizontal,
                   resizeDuration: null,
                   onUpdate: (d) => setState(
                     () => _drag = d.direction == DismissDirection.startToEnd
@@ -125,7 +167,10 @@ class AlertReviewState extends State<AlertReview> {
                         ? RiderLabel.yes
                         : RiderLabel.no,
                   ),
-                  child: AlertCard(incident: incident, drag: _drag),
+                  child: FractionalTranslation(
+                    translation: Offset(_flyingTo * _fly.value * 1.3, 0),
+                    child: AlertCard(incident: incident, drag: _drag),
+                  ),
                 ),
               ),
             ),
@@ -133,18 +178,18 @@ class AlertReviewState extends State<AlertReview> {
           const SizedBox(height: 16),
           Row(
             children: [
-              _AnswerButton(
+              AlertAnswerButton(
                 key: const Key('alert-no'),
                 label: 'NO',
                 color: AppColors.amber,
-                onPressed: () => _answer(RiderLabel.no),
+                onPressed: () => _tap(RiderLabel.no),
               ),
               const SizedBox(width: 12),
-              _AnswerButton(
+              AlertAnswerButton(
                 key: const Key('alert-yes'),
                 label: 'YES',
                 color: AppColors.green,
-                onPressed: () => _answer(RiderLabel.yes),
+                onPressed: () => _tap(RiderLabel.yes),
               ),
             ],
           ),
@@ -179,62 +224,5 @@ class _SlideIn extends StatelessWidget {
       ),
     ),
     child: child,
-  );
-}
-
-class _Dots extends StatelessWidget {
-  const _Dots({required this.count, required this.on});
-
-  final int count;
-
-  /// Dots lit from the left.
-  final int on;
-
-  @override
-  Widget build(BuildContext context) => Row(
-    mainAxisAlignment: MainAxisAlignment.center,
-    children: [
-      for (var i = 0; i < count; i++)
-        Flexible(
-          child: Container(
-            width: 22,
-            height: 4,
-            margin: const EdgeInsets.symmetric(horizontal: 2.5),
-            decoration: BoxDecoration(
-              color: i < on ? AppColors.cyan : Colors.white24,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-        ),
-    ],
-  );
-}
-
-class _AnswerButton extends StatelessWidget {
-  const _AnswerButton({
-    super.key,
-    required this.label,
-    required this.color,
-    required this.onPressed,
-  });
-
-  final String label;
-  final Color color;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) => Expanded(
-    child: FilledButton(
-      onPressed: onPressed,
-      style: FilledButton.styleFrom(
-        backgroundColor: color,
-        minimumSize: const Size.fromHeight(56),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      ),
-      child: Text(
-        label,
-        style: AppText.display(15, color: AppColors.background),
-      ),
-    ),
   );
 }

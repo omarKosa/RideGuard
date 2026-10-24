@@ -120,3 +120,62 @@ class AlertCard extends StatelessWidget {
     );
   }
 }
+
+/// Progress through the cards.
+class AlertDots extends StatelessWidget {
+  const AlertDots({super.key, required this.count, required this.on});
+
+  final int count;
+
+  /// Dots lit from the left.
+  final int on;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisAlignment: MainAxisAlignment.center,
+    children: [
+      for (var i = 0; i < count; i++)
+        Flexible(
+          child: Container(
+            width: 22,
+            height: 4,
+            margin: const EdgeInsets.symmetric(horizontal: 2.5),
+            decoration: BoxDecoration(
+              color: i < on ? AppColors.cyan : Colors.white24,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+        ),
+    ],
+  );
+}
+
+/// YES or NO under the card.
+class AlertAnswerButton extends StatelessWidget {
+  const AlertAnswerButton({
+    super.key,
+    required this.label,
+    required this.color,
+    required this.onPressed,
+  });
+
+  final String label;
+  final Color color;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => Expanded(
+    child: FilledButton(
+      onPressed: onPressed,
+      style: FilledButton.styleFrom(
+        backgroundColor: color,
+        minimumSize: const Size.fromHeight(56),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      ),
+      child: Text(
+        label,
+        style: AppText.display(15, color: AppColors.background),
+      ),
+    ),
+  );
+}

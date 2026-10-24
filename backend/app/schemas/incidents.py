@@ -36,9 +36,16 @@ class IncidentIn(Strict):
     resolved_at: AwareDatetime | None = None
     rider_label: Literal["yes", "no"] | None = None
     labelled_at: AwareDatetime | None = None
+    # Deprecated: sent by app versions before rider labels, still queued in
+    # riders' outboxes. True on a warning (never a crash) without a label
+    # means the rider said "not real"; otherwise it is ignored.
+    false_alarm: bool | None = None
 
     @model_validator(mode="after")
     def _consistent(self) -> "IncidentIn":
+        if self.false_alarm and self.kind != "crash" and self.rider_label is None:
+            self.rider_label = "no"
+            self.labelled_at = self.resolved_at or self.detected_at
         if (self.latitude is None) != (self.longitude is None):
             raise ValueError("latitude and longitude must be sent together")
         if (self.kind == "crash") == (self.outcome == "warned"):

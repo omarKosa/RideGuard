@@ -203,6 +203,52 @@ async def test_label_requires_labelled_at(client, bike):
     assert "labelled_at" in r.text
 
 
+async def test_legacy_false_alarm_is_still_accepted(client, bike):
+    # Jobs queued by the previous app version still carry false_alarm.
+    ride_id = await start_ride(client, bike["bike_id"])
+    r = await client.put(
+        f"/v1/rides/{ride_id}/incidents/{new_id()}",
+        json=wobble_body() | {"false_alarm": True},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["rider_label"] == "no"
+    assert r.json()["labelled_at"] == r.json()["detected_at"]
+    assert r.json()["false_alarm"] is True
+
+    r = await client.put(
+        f"/v1/rides/{ride_id}/incidents/{new_id()}",
+        json=wobble_body() | {"false_alarm": False},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["rider_label"] is None
+
+    r = await client.put(
+        f"/v1/rides/{ride_id}/incidents/{new_id()}",
+        json=crash(**resolved("cancelled")) | {"false_alarm": False},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["rider_label"] is None
+    assert r.json()["false_alarm"] is False
+
+    # A crash never becomes a label this way.
+    r = await client.put(
+        f"/v1/rides/{ride_id}/incidents/{new_id()}",
+        json=crash(**resolved("cancelled")) | {"false_alarm": True},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["rider_label"] is None
+    assert r.json()["false_alarm"] is False
+
+    # An explicit label wins over the legacy flag.
+    r = await client.put(
+        f"/v1/rides/{ride_id}/incidents/{new_id()}",
+        json=wobble_body() | label("yes") | {"false_alarm": True},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["rider_label"] == "yes"
+    assert r.json()["false_alarm"] is False
+
+
 def clip(**overrides) -> dict:
     body = {
         "rate_hz": 50.0,

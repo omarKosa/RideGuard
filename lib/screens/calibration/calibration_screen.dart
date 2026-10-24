@@ -35,19 +35,22 @@ class CalibrationScreen extends StatelessWidget {
           )..start(),
         ),
       ],
-      child: const _CalibrationView(),
+      child: const CalibrationView(),
     );
   }
 }
 
-class _CalibrationView extends StatefulWidget {
-  const _CalibrationView();
+/// The init ride's screens, driven by the [CalibrationController] and
+/// [SafetyController] above it: tasks, then any alert cards, then the
+/// result.
+class CalibrationView extends StatefulWidget {
+  const CalibrationView({super.key});
 
   @override
-  State<_CalibrationView> createState() => _CalibrationViewState();
+  State<CalibrationView> createState() => _CalibrationViewState();
 }
 
-class _CalibrationViewState extends State<_CalibrationView> {
+class _CalibrationViewState extends State<CalibrationView> {
   final _review = GlobalKey<AlertReviewState>();
 
   Future<void> _confirmAbort(BuildContext context) async {
