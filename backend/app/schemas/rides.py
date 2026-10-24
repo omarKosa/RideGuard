@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import AwareDatetime, BaseModel, Field, model_validator
 
 from .common import LeanMagnitude, SpeedKmh, Strict
+from .model_checks import Measured
 
 
 # ---------------------------------------------------------------------- rides
@@ -86,6 +87,26 @@ class BrakeEventIn(Strict):
         return self
 
 
+class HistogramIn(Strict):
+    min: Annotated[float, Field(gt=0)]
+    max: float
+    counts: Annotated[list[Annotated[int, Field(ge=0)]], Field(max_length=100)]
+
+    @model_validator(mode="after")
+    def _ordered(self) -> "HistogramIn":
+        if self.max <= self.min:
+            raise ValueError("max must be greater than min")
+        return self
+
+
+class BandStatsIn(Strict):
+    band: Literal["20-40", "40-60", "60-90", "90-120", "120+"]
+    seconds: Annotated[int, Field(ge=0)]
+    wobble_rms: HistogramIn
+    wobble_hz: HistogramIn
+    peak_g: HistogramIn
+
+
 class SafetyStatsIn(Strict):
     """Normal riding as the phone saw it, and the thresholds it used."""
 
@@ -97,6 +118,7 @@ class SafetyStatsIn(Strict):
     wobble_max_hz: Annotated[float, Field(ge=0, le=500)]
     impact_threshold_g: Annotated[float, Field(gt=0, le=100)]
     extreme_lean_deg: Annotated[float, Field(gt=0, le=90)]
+    bands: Annotated[list[BandStatsIn], Field(max_length=5)] = []
 
 
 class RideSummaryIn(Strict):
@@ -109,6 +131,7 @@ class RideSummaryIn(Strict):
     window: StatsIn
     brake_events: Annotated[list[BrakeEventIn], Field(max_length=5000)]
     safety_stats: SafetyStatsIn | None = None
+    performance: Measured | None = None
 
 
 class BrakeEventOut(BaseModel):
@@ -143,6 +166,7 @@ class RideOut(BaseModel):
     avg_moving_speed_kmh: float | None
     window_stats: dict | None
     safety_stats: dict | None
+    performance: dict | None
     brake_events: list[BrakeEventOut] = []
 
 

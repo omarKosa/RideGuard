@@ -18,6 +18,10 @@ IncidentOutcome = Literal[
 ]
 
 
+# One IMU sample: [t, x, y, z].
+Row = Annotated[list[float], Field(min_length=4, max_length=4)]
+
+
 class IncidentIn(Strict):
     kind: IncidentKind
     detected_at: AwareDatetime
@@ -30,7 +34,8 @@ class IncidentIn(Strict):
     longitude: Annotated[float, Field(ge=-180, le=180)] | None = None
     outcome: IncidentOutcome
     resolved_at: AwareDatetime | None = None
-    false_alarm: bool = False
+    rider_label: Literal["yes", "no"] | None = None
+    labelled_at: AwareDatetime | None = None
 
     @model_validator(mode="after")
     def _consistent(self) -> "IncidentIn":
@@ -45,8 +50,10 @@ class IncidentIn(Strict):
             raise ValueError(f"resolved_at does not match outcome '{self.outcome}'")
         if self.resolved_at is not None and self.resolved_at < self.detected_at:
             raise ValueError("resolved_at is before detected_at")
-        if self.false_alarm and self.kind == "crash":
-            raise ValueError("a crash cannot be marked as a false alarm")
+        if (self.rider_label is None) != (self.labelled_at is None):
+            raise ValueError("rider_label and labelled_at must be sent together")
+        if self.labelled_at is not None and self.labelled_at < self.detected_at:
+            raise ValueError("labelled_at is before detected_at")
         return self
 
 
@@ -64,4 +71,13 @@ class IncidentOut(BaseModel):
     longitude: float | None
     outcome: str
     resolved_at: datetime | None
+    rider_label: str | None
+    labelled_at: datetime | None
     false_alarm: bool
+
+
+class ClipIn(Strict):
+    rate_hz: Annotated[float, Field(gt=0, le=1000)]
+    start_offset_s: Annotated[float, Field(ge=-10, le=0)]
+    accel: Annotated[list[Row], Field(max_length=1500)]
+    gyro: Annotated[list[Row], Field(max_length=1500)]

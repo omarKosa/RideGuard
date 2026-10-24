@@ -131,29 +131,46 @@ async def test_database_enforces_incident_rules(client, bike):
 # ------------------------------------------------------------ safety learning
 
 
-async def test_rider_can_mark_a_warning_as_false_alarm(client, bike):
+def label(value: str) -> dict:
+    return {"rider_label": value, "labelled_at": iso(T0 + timedelta(minutes=13))}
+
+
+def wobble_body() -> dict:
+    return crash(kind="wobble", outcome="warned", wobble_hz=7.2, wobble_rms=0.64,
+                 peak_accel_g=None)
+
+
+async def test_rider_label_yes_and_no(client, bike):
     ride_id = await start_ride(client, bike["bike_id"])
     url = f"/v1/rides/{ride_id}/incidents/{new_id()}"
-    wobble = crash(kind="wobble", outcome="warned", wobble_hz=7.2, wobble_rms=0.64,
-                   peak_accel_g=None)
-    r = await client.put(url, json=wobble)
+    r = await client.put(url, json=wobble_body())
     assert r.status_code == 200, r.text
     assert r.json()["false_alarm"] is False
+    assert r.json()["rider_label"] is None
+    assert r.json()["labelled_at"] is None
     assert r.json()["wobble_rms"] == pytest.approx(0.64)
 
-    r = await client.put(url, json=wobble | {"false_alarm": True})
+    r = await client.put(url, json=wobble_body() | label("no"))
     assert r.status_code == 200, r.text
+    assert r.json()["rider_label"] == "no"
+    assert r.json()["labelled_at"] is not None
     assert r.json()["false_alarm"] is True
 
+    r = await client.put(url, json=wobble_body() | label("yes"))
+    assert r.status_code == 200, r.text
+    assert r.json()["rider_label"] == "yes"
+    assert r.json()["false_alarm"] is False
 
-async def test_a_crash_is_never_a_false_alarm(client, bike):
+
+async def test_crash_can_be_labelled_no_without_false_alarm(client, bike):
     ride_id = await start_ride(client, bike["bike_id"])
     r = await client.put(
         f"/v1/rides/{ride_id}/incidents/{new_id()}",
-        json=crash(false_alarm=True, **resolved("cancelled")),
+        json=crash(**resolved("cancelled")) | label("no"),
     )
-    assert r.status_code == 422
-    assert "cannot be marked as a false alarm" in r.text
+    assert r.status_code == 200, r.text
+    assert r.json()["rider_label"] == "no"
+    assert r.json()["false_alarm"] is False
 
     async with client.app.state.pool.acquire() as conn:
         with pytest.raises(asyncpg.CheckViolationError):
@@ -165,6 +182,87 @@ async def test_a_crash_is_never_a_false_alarm(client, bike):
                 """,
                 new_id(), ride_id, T0,
             )
+
+
+async def test_label_requires_labelled_at(client, bike):
+    ride_id = await start_ride(client, bike["bike_id"])
+    url = f"/v1/rides/{ride_id}/incidents/{new_id()}"
+    r = await client.put(url, json=wobble_body() | {"rider_label": "no"})
+    assert r.status_code == 422
+    r = await client.put(
+        url, json=wobble_body() | {"labelled_at": iso(T0 + timedelta(minutes=13))}
+    )
+    assert r.status_code == 422
+    r = await client.put(url, json=wobble_body() | label("maybe"))
+    assert r.status_code == 422
+    r = await client.put(
+        url,
+        json=wobble_body() | {"rider_label": "no", "labelled_at": iso(T0)},
+    )
+    assert r.status_code == 422
+    assert "labelled_at" in r.text
+
+
+def clip(**overrides) -> dict:
+    body = {
+        "rate_hz": 50.0,
+        "start_offset_s": -5.0,
+        "accel": [[-5.0 + 0.02 * i, 0.1, 9.8, 0.2] for i in range(10)],
+        "gyro": [[-5.0 + 0.02 * i, 0.0, 0.1, 0.0] for i in range(10)],
+    }
+    body.update(overrides)
+    return body
+
+
+async def test_clip_upload_and_replace(client, bike):
+    ride_id = await start_ride(client, bike["bike_id"])
+    incident_id = new_id()
+    r = await client.put(
+        f"/v1/rides/{ride_id}/incidents/{incident_id}", json=wobble_body()
+    )
+    assert r.status_code == 200, r.text
+    url = f"/v1/rides/{ride_id}/incidents/{incident_id}/clip"
+
+    r = await client.put(url, json=clip())
+    assert r.status_code == 204, r.text
+    r = await client.put(url, json=clip(rate_hz=100.0, accel=[[0, 1, 2, 3]]))
+    assert r.status_code == 204, r.text
+
+    async with client.app.state.pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM incident_clips")
+    [row] = rows
+    assert row["rate_hz"] == 100.0
+    assert row["accel"] == [[0, 1, 2, 3]]
+
+    # Wrong ride or unknown incident: 404.
+    other = await start_ride(client, bike["bike_id"])
+    r = await client.put(f"/v1/rides/{other}/incidents/{incident_id}/clip", json=clip())
+    assert r.status_code == 404
+    r = await client.put(f"/v1/rides/{ride_id}/incidents/{new_id()}/clip", json=clip())
+    assert r.status_code == 404
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"accel": [[0.0, 1.0, 2.0]]},
+        {"gyro": [[0.0, 1.0, 2.0, 3.0, 4.0]]},
+        {"accel": [[0.0, 1.0, 2.0, 3.0]] * 1501},
+        {"rate_hz": 0},
+        {"rate_hz": 2000},
+        {"start_offset_s": 1.0},
+        {"start_offset_s": -11.0},
+        {"extra": 1},
+    ],
+)
+async def test_clip_rejects_bad_rows(client, bike, override):
+    ride_id = await start_ride(client, bike["bike_id"])
+    incident_id = new_id()
+    await client.put(f"/v1/rides/{ride_id}/incidents/{incident_id}", json=wobble_body())
+    r = await client.put(
+        f"/v1/rides/{ride_id}/incidents/{incident_id}/clip", json=clip(**override)
+    )
+    assert r.status_code == 422
 
 
 SAFETY_STATS = {
@@ -209,3 +307,56 @@ async def test_ride_summary_keeps_safety_stats(client, bike):
     r = await client.put(f"/v1/rides/{ride_id}/summary", json=summary(safety_stats=bad))
     assert r.status_code == 422
     assert "impact_threshold_g" in r.text
+
+
+BAND = {
+    "band": "40-60",
+    "seconds": 300,
+    "wobble_rms": {"min": 0.01, "max": 2.0, "counts": [1] * 40},
+    "wobble_hz": {"min": 0.5, "max": 12.0, "counts": [0] * 40},
+    "peak_g": {"min": 0.5, "max": 8.0, "counts": [2] * 40},
+}
+PERFORMANCE = {
+    "sustained_top_speed_kmh": 131.0,
+    "peak_accel_mps2": 5.2,
+    "peak_decel_mps2": None,
+    "stops": [{"start_speed_kmh": 80.0, "duration_s": 6.5, "mean_decel_mps2": 3.4}],
+}
+
+
+async def test_summary_with_bands_and_performance(client, bike):
+    ride_id = await start_ride(client, bike["bike_id"])
+    r = await client.put(
+        f"/v1/rides/{ride_id}/summary",
+        json=summary(
+            safety_stats=SAFETY_STATS | {"bands": [BAND]}, performance=PERFORMANCE
+        ),
+    )
+    assert r.status_code == 200, r.text
+    r = await client.get(f"/v1/rides/{ride_id}")
+    body = r.json()
+    assert body["safety_stats"]["bands"][0]["band"] == "40-60"
+    assert body["safety_stats"]["bands"][0]["peak_g"]["counts"] == [2] * 40
+    assert body["performance"]["sustained_top_speed_kmh"] == 131.0
+    assert body["performance"]["stops"][0]["duration_s"] == 6.5
+
+    # Empty bands and absent/null performance are fine.
+    for extra in ({"safety_stats": SAFETY_STATS | {"bands": []}},
+                  {"safety_stats": SAFETY_STATS, "performance": None}):
+        other = await start_ride(client, bike["bike_id"])
+        r = await client.put(f"/v1/rides/{other}/summary", json=summary(**extra))
+        assert r.status_code == 200, r.text
+        assert r.json()["performance"] is None
+
+    bad = BAND | {"band": "10-20"}
+    r = await client.put(
+        f"/v1/rides/{ride_id}/summary",
+        json=summary(safety_stats=SAFETY_STATS | {"bands": [bad]}),
+    )
+    assert r.status_code == 422
+    bad = BAND | {"peak_g": {"min": 5, "max": 2, "counts": []}}
+    r = await client.put(
+        f"/v1/rides/{ride_id}/summary",
+        json=summary(safety_stats=SAFETY_STATS | {"bands": [bad]}),
+    )
+    assert r.status_code == 422

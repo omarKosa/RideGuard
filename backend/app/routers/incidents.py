@@ -3,10 +3,10 @@ from typing import Annotated
 from uuid import UUID
 
 import asyncpg
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 
 from ..deps import conflict, get_conn, not_found, unprocessable
-from ..schemas import IncidentIn, IncidentOut
+from ..schemas import ClipIn, IncidentIn, IncidentOut
 from .rides import CLOCK_SKEW
 
 router = APIRouter(prefix="/v1/rides", tags=["incidents"])
@@ -15,7 +15,7 @@ Conn = Annotated[asyncpg.Connection, Depends(get_conn)]
 INCIDENT_COLUMNS = """
     id, ride_id, kind, detected_at, speed_kmh, lean_deg, peak_accel_g,
     wobble_hz, wobble_rms, latitude, longitude, outcome, resolved_at,
-    false_alarm
+    rider_label, labelled_at, false_alarm
 """
 
 
@@ -36,15 +36,18 @@ async def upsert_incident(ride_id: UUID, incident_id: UUID, body: IncidentIn, co
         f"""
         INSERT INTO incidents (id, ride_id, kind, detected_at, speed_kmh,
             lean_deg, peak_accel_g, wobble_hz, wobble_rms, latitude,
-            longitude, outcome, resolved_at, false_alarm)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            longitude, outcome, resolved_at, rider_label, labelled_at, false_alarm)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+                $15, $16)
         ON CONFLICT (id) DO UPDATE
             SET outcome = EXCLUDED.outcome,
                 resolved_at = EXCLUDED.resolved_at,
+                rider_label = EXCLUDED.rider_label,
+                labelled_at = EXCLUDED.labelled_at,
                 false_alarm = EXCLUDED.false_alarm,
                 updated_at = now()
             -- Only the outcome (away from 'pending') and the rider's
-            -- false-alarm label change; a retried request is a no-op.
+            -- label change; a retried request is a no-op.
             WHERE incidents.ride_id = EXCLUDED.ride_id
               AND incidents.kind = EXCLUDED.kind
               AND (incidents.outcome = 'pending'
@@ -64,7 +67,9 @@ async def upsert_incident(ride_id: UUID, incident_id: UUID, body: IncidentIn, co
         body.longitude,
         body.outcome,
         body.resolved_at,
-        body.false_alarm,
+        body.rider_label,
+        body.labelled_at,
+        body.rider_label == "no" and body.kind != "crash",
     )
     if row is None:
         raise conflict("Incident already exists with a different ride, kind or outcome")
@@ -83,3 +88,25 @@ async def list_incidents(ride_id: UUID, conn: Conn):
         ride_id,
     )
     return [dict(r) for r in rows]
+
+
+@router.put("/{ride_id}/incidents/{incident_id}/clip", status_code=204)
+async def put_clip(ride_id: UUID, incident_id: UUID, body: ClipIn, conn: Conn):
+    if not await conn.fetchval(
+        "SELECT 1 FROM incidents WHERE id = $1 AND ride_id = $2", incident_id, ride_id
+    ):
+        raise not_found("Incident")
+    await conn.execute(
+        """
+        INSERT INTO incident_clips (incident_id, rate_hz, start_offset_s, accel, gyro)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (incident_id) DO UPDATE
+            SET rate_hz = EXCLUDED.rate_hz,
+                start_offset_s = EXCLUDED.start_offset_s,
+                accel = EXCLUDED.accel,
+                gyro = EXCLUDED.gyro,
+                created_at = now()
+        """,
+        incident_id, body.rate_hz, body.start_offset_s, body.accel, body.gyro,
+    )
+    return Response(status_code=204)

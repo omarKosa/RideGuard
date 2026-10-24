@@ -5,6 +5,7 @@ reaches Postgres. Everything is re-exported so `from ..schemas import X` works."
 from .calibrations import CalibrationIn, CalibrationOut
 from .common import LeanMagnitude, SpeedKmh, Strict, Vec3
 from .incidents import (
+    ClipIn,
     IncidentIn,
     IncidentKind,
     IncidentOut,
@@ -35,7 +36,7 @@ from .rides import (
 __all__ = [
     "BikeIn", "BikeOut", "BikeStatsOut",
     "BrakeEventIn", "BrakeEventOut",
-    "CalibrationIn", "CalibrationOut",
+    "CalibrationIn", "CalibrationOut", "ClipIn",
     "IncidentIn", "IncidentKind", "IncidentOut", "IncidentOutcome",
     "LeanMagnitude", "ModelCheckIn", "ModelCheckOut",
     "RideIn", "RideOut", "RideSummaryIn", "RiderIn", "RiderOut",

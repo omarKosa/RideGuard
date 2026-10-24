@@ -92,3 +92,26 @@ SELECT c.catalogue_model_id,
 FROM model_checks c
 WHERE c.catalogue_model_id IS NOT NULL
 GROUP BY c.catalogue_model_id;
+
+-- Rider labels on warnings and crashes ("was this real?"). false_alarm
+-- (003) stays, maintained by the API as rider_label = 'no' AND kind <> 'crash'.
+ALTER TABLE incidents
+    ADD COLUMN rider_label text CHECK (rider_label IN ('yes', 'no')),
+    ADD COLUMN labelled_at timestamptz,
+    ADD CONSTRAINT incidents_label_pair
+        CHECK ((rider_label IS NULL) = (labelled_at IS NULL));
+UPDATE incidents SET rider_label = 'no', labelled_at = updated_at
+ WHERE false_alarm;
+
+-- Raw IMU around an event, for tuning detection offline.
+CREATE TABLE incident_clips (
+    incident_id    uuid PRIMARY KEY REFERENCES incidents (id) ON DELETE CASCADE,
+    rate_hz        real NOT NULL CHECK (0 < rate_hz AND rate_hz <= 1000),
+    start_offset_s real NOT NULL CHECK (-10 <= start_offset_s AND start_offset_s <= 0),
+    accel          jsonb NOT NULL,
+    gyro           jsonb NOT NULL,
+    created_at     timestamptz NOT NULL DEFAULT now()
+);
+
+-- What the phone measured of the bike's performance on a ride.
+ALTER TABLE rides ADD COLUMN performance jsonb;
