@@ -12,6 +12,15 @@ class AppConfig {
     defaultValue: 'http://10.0.2.2:8000',
   );
 
+  /// Shows "Skip setup (testing)" on the first-run screens, which jumps
+  /// straight to Home with a placeholder bike and calibration. On in debug
+  /// builds; turn it on for a release build with
+  /// `--dart-define=RIDEGUARD_TEST_SHORTCUTS=true`.
+  static const bool testShortcuts = bool.fromEnvironment(
+    'RIDEGUARD_TEST_SHORTCUTS',
+    defaultValue: !bool.fromEnvironment('dart.vm.product'),
+  );
+
   /// Rolling analysis window ("buffer load") in minutes. Fixed by design so
   /// every ride is analysed the same way.
   static const int analysisWindowMinutes = 15;
