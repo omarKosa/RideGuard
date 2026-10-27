@@ -2,6 +2,10 @@ import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
 import '../config/app_config.dart';
+import '../core/calibration/calibration_session.dart';
+import '../core/fusion/motion_pipeline.dart';
+import '../core/fusion/mount_orientation.dart';
+import '../core/math/vec3.dart';
 import '../data/local_store.dart';
 import '../data/remote_repository.dart';
 import '../models/bike_profile.dart';
@@ -87,6 +91,38 @@ class AppState extends ChangeNotifier {
     await _store.setCalibration(profile);
     await _remote.saveCalibration(profile);
     notifyListeners();
+  }
+
+  /// Testing shortcut: skips bike setup and the init ride with a placeholder
+  /// bike (if none yet) and an unmeasured calibration for a phone in portrait
+  /// on the bars. A calibration ride is still registered so later rides can
+  /// reference the calibration on the backend.
+  Future<void> skipSetupForTesting() async {
+    final bike =
+        _bike ?? await saveBike(model: 'Test bike', ratedTopSpeedKmh: 200);
+    final now = DateTime.now();
+    final rideId = _uuid.v4();
+    await _remote.startRide(
+      rideId: rideId,
+      bikeId: bike.id,
+      kind: RideKind.calibration,
+      startedAt: now,
+      windowMinutes: AppConfig.analysisWindowMinutes,
+    );
+    await saveCalibration(
+      CalibrationProfile(
+        id: _uuid.v4(),
+        bikeId: bike.id,
+        rideId: rideId,
+        calibratedAt: now,
+        params: FusionParams(mount: MountOrientation.provisional(Vec3.unitY)),
+        forwardFromMotion: false,
+        straightOffsetDeg: 0,
+        quality: 0,
+        skippedTasks: [for (final t in CalibrationTask.values) t.name],
+        warnings: const ['Test setup: nothing was calibrated.'],
+      ),
+    );
   }
 
   Future<void> setLastRide(RideSummary summary) async {

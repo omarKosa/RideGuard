@@ -128,4 +128,32 @@ void main() {
     expect(find.textContaining('Ducati Monster'), findsOneWidget);
     expect(find.text('180'), findsOneWidget);
   });
+
+  testWidgets('the testing shortcut skips setup and the init ride', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    addTearDown(tester.view.reset);
+    final (app, widget, backend) = await buildApp();
+    await tester.pumpWidget(widget);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('skip-setup')));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('START RIDE'), findsOneWidget);
+    expect(app.startupStep, StartupStep.ready);
+    expect(app.bike!.model, 'Test bike');
+    // The calibration ride is registered before the calibration that
+    // references it.
+    expect(
+      backend.requests.map((r) => r.url.path),
+      containsAllInOrder([
+        '/v1/bikes/${app.bike!.id}',
+        '/v1/rides/${app.calibration!.rideId}',
+        '/v1/calibrations/${app.calibration!.id}',
+      ]),
+    );
+  });
 }

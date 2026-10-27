@@ -6,6 +6,7 @@ import '../models/bike_profile.dart';
 import '../services/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
+import '../widgets/skip_setup_button.dart';
 import 'safety_briefing_screen.dart';
 
 /// First screen of the app: which bike, and how fast can it go.
@@ -155,6 +156,10 @@ class _BikeSetupScreenState extends State<BikeSetupScreen> {
                         busy: _saving,
                         onPressed: _save,
                       ),
+                      if (!widget.editing) ...[
+                        const SizedBox(height: 12),
+                        const SkipSetupButton(),
+                      ],
                     ],
                   ),
                 ),

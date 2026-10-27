@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/calibration/calibration_session.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
+import '../widgets/skip_setup_button.dart';
 import 'calibration_screen.dart';
 
 /// Explains the init ride and makes the rider acknowledge the risks before
@@ -91,6 +92,8 @@ class _SafetyBriefingScreenState extends State<SafetyBriefingScreen> {
                   icon: Icons.flag_outlined,
                   onPressed: _allChecked ? _start : null,
                 ),
+                const SizedBox(height: 12),
+                const SkipSetupButton(),
               ],
             ),
           ),
