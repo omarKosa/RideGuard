@@ -2,14 +2,17 @@ from typing import Annotated
 from uuid import UUID
 
 import asyncpg
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.concurrency import run_in_threadpool
 
 from ..deps import conflict, get_conn, not_found
+from ..google_auth import GoogleNotConfigured, InvalidGoogleToken
 from ..schemas import (
     BikeIn,
     BikeOut,
     BikeStatsOut,
     CalibrationOut,
+    GoogleLinkIn,
     RideOut,
     RiderIn,
     RiderOut,
@@ -22,13 +25,17 @@ BIKE_COLUMNS = (
     "catalogue_version, other_make, other_model, other_year, "
     "top_speed_source, created_at"
 )
+RIDER_COLUMNS = (
+    "id, platform, phone_model, os_version, google_email, google_name, "
+    "created_at"
+)
 Conn = Annotated[asyncpg.Connection, Depends(get_conn)]
 
 
 @router.put("/riders/{rider_id}", response_model=RiderOut)
 async def upsert_rider(rider_id: UUID, body: RiderIn, conn: Conn):
     row = await conn.fetchrow(
-        """
+        f"""
         INSERT INTO riders (id, platform, phone_model, os_version)
         VALUES ($1, $2, $3, $4)
         ON CONFLICT (id) DO UPDATE
@@ -36,7 +43,7 @@ async def upsert_rider(rider_id: UUID, body: RiderIn, conn: Conn):
                 phone_model = EXCLUDED.phone_model,
                 os_version = EXCLUDED.os_version,
                 updated_at = now()
-        RETURNING id, platform, phone_model, os_version, created_at
+        RETURNING {RIDER_COLUMNS}
         """,
         rider_id,
         body.platform,
@@ -49,10 +56,51 @@ async def upsert_rider(rider_id: UUID, body: RiderIn, conn: Conn):
 @router.get("/riders/{rider_id}", response_model=RiderOut)
 async def get_rider(rider_id: UUID, conn: Conn):
     row = await conn.fetchrow(
-        "SELECT id, platform, phone_model, os_version, created_at FROM riders WHERE id = $1", rider_id
+        f"SELECT {RIDER_COLUMNS} FROM riders WHERE id = $1", rider_id
     )
     if row is None:
         raise not_found("Rider")
+    return dict(row)
+
+
+@router.put("/riders/{rider_id}/google", response_model=RiderOut)
+async def link_google(
+    rider_id: UUID, body: GoogleLinkIn, request: Request, conn: Conn
+):
+    """Links the Google account the phone signed in with to this rider.
+    The token is verified with Google; an account already linked to another
+    rider (an earlier install) moves to this one."""
+    verify = request.app.state.verify_google
+    try:
+        identity = await run_in_threadpool(verify, body.id_token)
+    except GoogleNotConfigured:
+        raise HTTPException(503, "Google sign-in is not configured on the server")
+    except InvalidGoogleToken:
+        raise HTTPException(401, "Invalid Google sign-in token")
+    async with conn.transaction():
+        if not await conn.fetchval("SELECT 1 FROM riders WHERE id = $1", rider_id):
+            raise not_found("Rider")
+        await conn.execute(
+            """
+            UPDATE riders SET google_sub = NULL, google_email = NULL,
+                google_name = NULL, google_linked_at = NULL, updated_at = now()
+            WHERE google_sub = $1 AND id <> $2
+            """,
+            identity.sub,
+            rider_id,
+        )
+        row = await conn.fetchrow(
+            f"""
+            UPDATE riders SET google_sub = $2, google_email = $3,
+                google_name = $4, google_linked_at = now(), updated_at = now()
+            WHERE id = $1
+            RETURNING {RIDER_COLUMNS}
+            """,
+            rider_id,
+            identity.sub,
+            identity.email,
+            (identity.name or None) and identity.name[:120],
+        )
     return dict(row)
 
 

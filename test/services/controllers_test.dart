@@ -63,7 +63,7 @@ void main() {
   testWidgets(
     'init ride then a real ride, end to end through the controllers',
     (tester) async {
-      SharedPreferences.setMockInitialValues({});
+      SharedPreferences.setMockInitialValues(signedInPrefs());
       final stack = offlineFirstStack();
       final app = AppState(
         store: await LocalStore.open(),
@@ -181,10 +181,67 @@ void main() {
     },
   );
 
+  testWidgets('a ride without the init ride learns the mount as it goes', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues(signedInPrefs());
+    final stack = offlineFirstStack();
+    final app = AppState(
+      store: await LocalStore.open(),
+      remote: stack.remote,
+      catalogue: realCatalogue(),
+    );
+    await app.load();
+    await app.saveBike(
+      const OtherChoice(make: 'Honda', model: 'PCX 125', topSpeedKmh: 105),
+    );
+    await app.skipInitRide();
+    expect(app.calibration, isNull);
+    expect(app.startupStep, StartupStep.ready);
+
+    final source = FakeSensorSource();
+    final pipe = _SourcePipe(source);
+    Future<void> noop(bool _) async {}
+    final ride = RideController(
+      app: app,
+      feed: SensorFeed(source, clock: () => pipe.t),
+      safety: SafetyController(app: app, platform: FakeEmergencyPlatform()),
+      keepAwake: noop,
+    );
+    final sim = RideSimulator(mount: Mount.handlebarPortrait);
+    Future<void> drive(void Function() segment) async {
+      segment();
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 150)),
+      );
+    }
+
+    await tester.runAsync(ride.start);
+    for (var i = 0; i < 3; i++) {
+      await drive(() => sim.still(pipe, 1));
+    }
+    await drive(() => sim.accelerateTo(pipe, 50));
+    for (var i = 0; i < 4; i++) {
+      await drive(() => sim.cruise(pipe, 1));
+    }
+    expect(ride.state!.mountReady, isTrue);
+    expect(ride.state!.speedKmh, closeTo(50, 3));
+    final summary = (await tester.runAsync(ride.stop))!;
+    ride.dispose();
+
+    expect(summary.totals.maxSpeedKmh, closeTo(50, 3));
+    await tester.runAsync(stack.sync.flush);
+    final header = stack.backend
+        .bodiesFor('PUT', RegExp('/v1/rides/${summary.rideId}\$'))
+        .single;
+    expect(header['calibration_id'], isNull);
+    expect(stack.sync.dropped, 0);
+  });
+
   testWidgets('init ride with a catalogue bike uploads a model check', (
     tester,
   ) async {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues(signedInPrefs());
     final stack = offlineFirstStack();
     final catalogue = realCatalogue();
     final app = AppState(
@@ -306,7 +363,7 @@ void main() {
   testWidgets('a crash mid-ride sounds the alarm and calls the contact', (
     tester,
   ) async {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues(signedInPrefs());
     final stack = offlineFirstStack();
     final app = AppState(
       store: await LocalStore.open(),

@@ -13,6 +13,7 @@ import 'data/remote_repository.dart';
 import 'data/sync_service.dart';
 import 'services/app_state.dart';
 import 'services/emergency_platform.dart';
+import 'services/google_auth.dart';
 import 'services/phone_info.dart';
 import 'services/sensor_feed.dart';
 
@@ -54,6 +55,7 @@ Future<void> main() async {
       api: api,
       sensors: DeviceSensorSource(),
       emergency: const DeviceEmergencyPlatform(),
+      googleAuth: DeviceGoogleAuth(),
     ),
   );
 }

@@ -16,6 +16,7 @@ from .riders import (
     BikeIn,
     BikeOut,
     BikeStatsOut,
+    GoogleLinkIn,
     RiderIn,
     RiderOut,
 )
@@ -34,6 +35,7 @@ from .rides import (
 )
 
 __all__ = [
+    "GoogleLinkIn",
     "BikeIn", "BikeOut", "BikeStatsOut",
     "BrakeEventIn", "BrakeEventOut",
     "CalibrationIn", "CalibrationOut", "ClipIn",

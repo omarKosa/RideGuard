@@ -3,11 +3,10 @@ import 'package:provider/provider.dart';
 
 import 'data/api_client.dart';
 import 'data/sync_service.dart';
-import 'screens/bike_setup/bike_setup_screen.dart';
-import 'screens/home_screen.dart';
-import 'screens/safety_briefing_screen.dart';
+import 'screens/start_screen.dart';
 import 'services/app_state.dart';
 import 'services/emergency_platform.dart';
+import 'services/google_auth.dart';
 import 'services/sensor_feed.dart';
 import 'theme/app_theme.dart';
 
@@ -19,6 +18,7 @@ class RideGuardApp extends StatelessWidget {
     required this.api,
     required this.sensors,
     required this.emergency,
+    required this.googleAuth,
   });
 
   final AppState appState;
@@ -26,6 +26,7 @@ class RideGuardApp extends StatelessWidget {
   final ApiClient api;
   final SensorSource sensors;
   final EmergencyPlatform emergency;
+  final GoogleAuth googleAuth;
 
   @override
   Widget build(BuildContext context) {
@@ -36,17 +37,14 @@ class RideGuardApp extends StatelessWidget {
         Provider.value(value: api),
         Provider.value(value: sensors),
         Provider.value(value: emergency),
+        Provider.value(value: googleAuth),
       ],
       child: MaterialApp(
         title: 'RideGuard',
         debugShowCheckedModeBanner: false,
         theme: buildAppTheme(),
-        // Setup first: bike -> init ride -> riding.
-        home: switch (appState.startupStep) {
-          StartupStep.bikeSetup => const BikeSetupScreen(),
-          StartupStep.calibration => const SafetyBriefingScreen(),
-          StartupStep.ready => const HomeScreen(),
-        },
+        // Setup first: sign in -> bike -> init ride -> riding.
+        home: startScreenFor(appState.startupStep),
       ),
     );
   }

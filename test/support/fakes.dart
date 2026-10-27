@@ -12,6 +12,8 @@ import 'package:ride_guard/data/remote_repository.dart';
 import 'package:ride_guard/data/sync_service.dart';
 import 'package:ride_guard/services/emergency_platform.dart';
 import 'package:ride_guard/services/sensor_feed.dart';
+import 'package:ride_guard/models/rider_account.dart';
+import 'package:ride_guard/services/google_auth.dart';
 
 /// Sensor source fed by the test.
 class FakeSensorSource implements SensorSource {
@@ -72,6 +74,40 @@ class FakeEmergencyPlatform implements EmergencyPlatform {
   @override
   Future<bool> requestCallPermission() async => permission;
 }
+
+/// Google sign-in without the platform: returns [result], or throws [error].
+class FakeGoogleAuth implements GoogleAuth {
+  GoogleSignInResult result = const GoogleSignInResult(
+    account: testAccount,
+    idToken: 'test-id-token-from-google-xxxxxxxx',
+  );
+  GoogleAuthException? error;
+  int signIns = 0;
+  int signOuts = 0;
+
+  @override
+  Future<GoogleSignInResult> signIn() async {
+    signIns++;
+    final e = error;
+    if (e != null) throw e;
+    return result;
+  }
+
+  @override
+  Future<void> signOut() async => signOuts++;
+}
+
+/// Shared-preferences contents of a rider who already signed in.
+Map<String, Object> signedInPrefs([Map<String, Object> extra = const {}]) => {
+  'account': jsonEncode(testAccount.toJson()),
+  ...extra,
+};
+
+const testAccount = RiderAccount(
+  googleId: 'g-1',
+  email: 'mona@example.com',
+  name: 'Mona',
+);
 
 /// Records every request and answers with [status] (default 200).
 class RecordingBackend {

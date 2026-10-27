@@ -1,10 +1,8 @@
 """Rider and bike models."""
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
-
-from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -26,7 +24,15 @@ class RiderOut(BaseModel):
     platform: str | None
     phone_model: str | None
     os_version: str | None
+    google_email: str | None = None
+    google_name: str | None = None
     created_at: datetime
+
+
+class GoogleLinkIn(Strict):
+    """The ID token from Google sign-in on the phone."""
+
+    id_token: Annotated[str, Field(min_length=20, max_length=4096)]
 
 
 # ---------------------------------------------------------------------- bikes

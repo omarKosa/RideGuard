@@ -18,7 +18,8 @@ import 'ride_recorder.dart';
 import 'safety_controller.dart';
 import 'sensor_feed.dart';
 
-/// A regular ride using the saved calibration.
+/// A regular ride using the saved calibration, or, when the rider skipped
+/// the init ride, one that learns the phone mount as it goes.
 class RideController extends ChangeNotifier {
   RideController({
     required AppState app,
@@ -80,16 +81,17 @@ class RideController extends ChangeNotifier {
 
   Future<void> start() async {
     final bike = _app.bike;
-    final calibration = _app.calibration;
-    if (bike == null || calibration == null) {
-      throw StateError('Calibrate before riding');
-    }
+    if (bike == null) throw StateError('Set up a bike before riding');
+    // A calibration from another bike would describe the wrong mount.
+    final calibration = _app.calibration?.bikeId == bike.id
+        ? _app.calibration
+        : null;
     _calibration = calibration;
     final recorder = RideRecorder(
       rideId: _uuid.v4(),
       kind: RideKind.ride,
       bikeId: bike.id,
-      calibrationId: calibration.id,
+      calibrationId: calibration?.id,
       remote: _app.remote,
       clock: _clock,
     );
@@ -114,7 +116,7 @@ class RideController extends ChangeNotifier {
             onClip: safety.reportClip,
           );
     await _feed.start(
-      MotionPipeline(params: calibration.params),
+      MotionPipeline(params: calibration?.params),
       _onTick,
       safety: _monitor,
     );

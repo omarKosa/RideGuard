@@ -90,7 +90,7 @@ void main() {
       stack.backend.bodiesFor('PUT', '/v1/bikes/$bikeId/model-checks/');
 
   setUp(() async {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues(signedInPrefs());
     stack = offlineFirstStack();
     app = await open();
   });
@@ -322,16 +322,18 @@ void main() {
       ratedTopSpeedKmh: 220,
       createdAt: DateTime.utc(2026, 1, 2),
     );
-    SharedPreferences.setMockInitialValues({
-      'rider_id': 'r0000000-0000-4000-8000-000000000001',
-      'bike': jsonEncode({
-        'id': legacy.id,
-        'model': legacy.model,
-        'rated_top_speed_kmh': 220,
-        'created_at': '2026-01-02T00:00:00.000Z',
+    SharedPreferences.setMockInitialValues(
+      signedInPrefs({
+        'rider_id': 'r0000000-0000-4000-8000-000000000001',
+        'bike': jsonEncode({
+          'id': legacy.id,
+          'model': legacy.model,
+          'rated_top_speed_kmh': 220,
+          'created_at': '2026-01-02T00:00:00.000Z',
+        }),
+        'calibration': jsonEncode(_calibrationFor(legacy).toJson()),
       }),
-      'calibration': jsonEncode(_calibrationFor(legacy).toJson()),
-    });
+    );
     stack = offlineFirstStack();
     app = await open();
     await stack.sync.flush();

@@ -6,6 +6,7 @@ import '../../data/sync_service.dart';
 import '../../services/app_state.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
+import 'account_card.dart';
 import 'emergency_contact_card.dart';
 import 'safety_learning_card.dart';
 
@@ -140,6 +141,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ],
                 ),
               ),
+              const SizedBox(height: 12),
+              const AccountCard(),
             ],
           ),
         ),

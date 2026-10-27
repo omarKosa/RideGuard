@@ -6,6 +6,7 @@ import '../core/safety/safety_baseline.dart';
 import '../models/bike_profile.dart';
 import '../models/calibration_profile.dart';
 import '../models/emergency_contact.dart';
+import '../models/rider_account.dart';
 import '../models/model_check.dart';
 import '../models/ride_summary.dart';
 import '../services/phone_info.dart';
@@ -26,6 +27,9 @@ class LocalStore {
   static const _apiUrl = 'api_url';
   static const _emergencyContact = 'emergency_contact';
   static const _safetyBaseline = 'safety_baseline';
+  static const _account = 'account';
+  static const _signInSkipped = 'sign_in_skipped';
+  static const _initRideSkippedFor = 'init_ride_skipped_for';
   static const _initReadings = 'init_readings';
   static const _sentPhone = 'sent_phone';
 
@@ -78,6 +82,21 @@ class LocalStore {
   Future<void> setInitReadings(InitReadings? r) => r == null
       ? _prefs.remove(_initReadings)
       : _write(_initReadings, r.toJson());
+
+  RiderAccount? get account => _read(_account, RiderAccount.fromJson);
+  Future<void> setAccount(RiderAccount? a) =>
+      a == null ? _prefs.remove(_account) : _write(_account, a.toJson());
+
+  /// Debug builds only: the developer skipped Google sign-in.
+  bool get signInSkipped => _prefs.getBool(_signInSkipped) ?? false;
+  Future<void> setSignInSkipped(bool v) =>
+      v ? _prefs.setBool(_signInSkipped, true) : _prefs.remove(_signInSkipped);
+
+  /// The bike whose init ride the rider chose to skip for now.
+  String? get initRideSkippedFor => _prefs.getString(_initRideSkippedFor);
+  Future<void> setInitRideSkippedFor(String? bikeId) => bikeId == null
+      ? _prefs.remove(_initRideSkippedFor)
+      : _prefs.setString(_initRideSkippedFor, bikeId);
 
   T? _read<T>(String key, T Function(Map<String, dynamic>) fromJson) {
     final raw = _prefs.getString(key);

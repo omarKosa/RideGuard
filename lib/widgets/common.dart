@@ -245,3 +245,39 @@ String formatDuration(Duration d) {
 String formatDistance(double meters) => meters < 1000
     ? '${meters.toStringAsFixed(0)} m'
     : '${(meters / 1000).toStringAsFixed(2)} km';
+
+/// The round red bike badge and the app name.
+class AppLogo extends StatelessWidget {
+  const AppLogo({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Container(
+          width: 72,
+          height: 72,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: const LinearGradient(
+              colors: [AppColors.red, Color(0xFFFF6B6B)],
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.red.withValues(alpha: 0.4),
+                blurRadius: 30,
+                spreadRadius: 5,
+              ),
+            ],
+          ),
+          child: const Icon(Icons.two_wheeler, size: 38, color: Colors.white),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'RIDEGUARD',
+          style: AppText.display(28).copyWith(letterSpacing: 8),
+        ),
+      ],
+    );
+  }
+}

@@ -316,7 +316,7 @@ class _BikeSetupScreenState extends State<BikeSetupScreen> {
     final model = _model;
     return [
       if (!widget.editing) ...[
-        const _Logo(),
+        const AppLogo(),
         const SizedBox(height: 20),
         Text(
           'SET UP YOUR BIKE',
@@ -453,40 +453,5 @@ class _Link extends StatelessWidget {
             icon: Icon(i, size: 20),
             label: text,
           );
-  }
-}
-
-class _Logo extends StatelessWidget {
-  const _Logo();
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Container(
-          width: 72,
-          height: 72,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: const LinearGradient(
-              colors: [AppColors.red, Color(0xFFFF6B6B)],
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.red.withValues(alpha: 0.4),
-                blurRadius: 30,
-                spreadRadius: 5,
-              ),
-            ],
-          ),
-          child: const Icon(Icons.two_wheeler, size: 38, color: Colors.white),
-        ),
-        const SizedBox(height: 16),
-        Text(
-          'RIDEGUARD',
-          style: AppText.display(28).copyWith(letterSpacing: 8),
-        ),
-      ],
-    );
   }
 }

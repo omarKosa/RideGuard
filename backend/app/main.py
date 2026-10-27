@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from .catalogue_sync import sync_catalogue
 from .db import create_pool, migrate
+from .google_auth import verify_google_id_token
 from .routers import calibrations, incidents, model_checks, riders, rides
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
@@ -34,6 +35,8 @@ def create_app(database_url: str | None = None) -> FastAPI:
         "speed, braking and the phone-mount calibration behind them.",
         lifespan=lifespan,
     )
+    # Swappable in tests; the real one asks Google.
+    app.state.verify_google = verify_google_id_token
     app.include_router(riders.router)
     app.include_router(rides.router)
     app.include_router(calibrations.router)

@@ -19,11 +19,22 @@ docker-compose.yml   Postgres + API (+ test runner)
 
 ## How it works
 
-### 1. Setup → init ride
-The app starts on **bike setup**: pick the make, then the model (see
-section 8), and the fastest possible speed. It then
-shows a **safety briefing** that must be acknowledged, and runs the **init
-ride**. The ride advances by itself (vibrating at each step), so the rider
+### 1. Sign in → setup → init ride
+The app starts on a **login page**: *Continue with Google* (see
+[Google sign-in](#google-sign-in)). Debug builds also show *Skip sign-in*.
+Signing out (Settings → Account) returns here and keeps the bike and rides
+on the phone.
+
+Then **bike setup**: pick the make, then the model (see section 8), and the
+fastest possible speed. The **init ride** page explains the tasks calmly;
+the safety warning and its four acknowledgements appear in a **popup** when
+the rider taps *START INIT RIDE*, and START stays disabled until every box
+is ticked. *Skip for now* goes straight to Home: rides then learn the phone
+mount as they go with default settings (less accurate), and Home shows an
+*Init ride* card to do it later. Skipping applies to the current bike only;
+a different bike asks again.
+
+The init ride advances by itself (vibrating at each step), so the rider
 never touches the phone:
 
 | Task | What it calibrates |
@@ -231,7 +242,8 @@ Postgres is published on `127.0.0.1:5432` only. The API listens on all
 interfaces so a phone on the same Wi-Fi can reach it. Migrations run
 automatically at API start. An existing install needs
 `docker compose up -d --build` to rebuild the API image so migrations
-002-004 (labels, clips, catalogue, model checks) are applied.
+002-005 (labels, clips, catalogue, model checks, Google accounts) are
+applied.
 
 > If `docker` says *permission denied*, either prefix commands with `sudo`
 > or add yourself to the group: `sudo usermod -aG docker $USER` (then log
@@ -250,6 +262,33 @@ flutter run --dart-define=RIDEGUARD_API_URL=http://192.168.1.20:8000
 The server URL can also be changed in **Settings → Backend** (with a
 connection test). Cleartext HTTP is enabled for development. Put the API
 behind HTTPS before using it outside your LAN.
+
+## Google sign-in
+
+Google sign-in needs OAuth clients in a Google Cloud project (one-time):
+
+1. **Google Cloud console → APIs & Services → Credentials** (configure the
+   OAuth consent screen if asked).
+2. Create an **Android** OAuth client: package `com.example.motorcycle_rider_app`
+   and the SHA-1 of your signing key (`cd android && ./gradlew signingReport`;
+   the debug key for `flutter run`).
+3. Create a **Web application** OAuth client. Its client id is the
+   *server client id*: the app asks Google for an ID token issued to it, and
+   the backend only accepts tokens for it.
+4. Build the app with it and give the backend the same id:
+
+```bash
+flutter run --dart-define=GOOGLE_SERVER_CLIENT_ID=<web-id>.apps.googleusercontent.com
+echo 'GOOGLE_CLIENT_IDS=<web-id>.apps.googleusercontent.com' >> .env
+docker compose up -d --build
+```
+
+The app sends the ID token once (`PUT /v1/riders/{id}/google`); the backend
+verifies it with Google and stores the Google account id, verified email
+and name on the rider. Signing in on a new install moves the link to the
+new rider. Without `GOOGLE_CLIENT_IDS` the backend answers 503 and the
+app's upload retries later; without `GOOGLE_SERVER_CLIENT_ID` the login
+page says sign-in isn't set up (debug builds can skip it).
 
 ## Tests
 
@@ -270,7 +309,8 @@ acceleration and braking, with the phone mounted at any rotation.
 
 | Method | Path | |
 |---|---|---|
-| PUT/GET | `/v1/riders/{id}` | Upsert (platform, phone model, OS version) / read rider |
+| PUT/GET | `/v1/riders/{id}` | Upsert (platform, phone model, OS version) / read rider (incl. linked Google email/name) |
+| PUT | `/v1/riders/{id}/google` | Link the Google account: `{id_token}` verified with Google (401 invalid, 503 not configured) |
 | PUT/GET | `/v1/bikes/{id}` | Upsert / read bike (catalogue model + version, or Other make / model / year) |
 | PUT | `/v1/bikes/{id}/model-checks/{check_id}` | Init-ride spec check (idempotent; first write wins) |
 | GET | `/v1/bikes/{id}/model-checks` | A bike's checks, newest first |

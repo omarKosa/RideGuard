@@ -14,10 +14,12 @@ import '../models/calibration_profile.dart';
 import '../models/emergency_contact.dart';
 import '../models/incident.dart';
 import '../models/model_check.dart';
+import '../models/rider_account.dart';
 import '../models/ride_summary.dart';
+import 'google_auth.dart';
 import 'phone_info.dart';
 
-enum StartupStep { bikeSetup, calibration, ready }
+enum StartupStep { signIn, bikeSetup, calibration, ready }
 
 /// Who is riding what, how the phone is calibrated, and user settings.
 class AppState extends ChangeNotifier {
@@ -45,6 +47,9 @@ class AppState extends ChangeNotifier {
   EmergencyContact? _emergencyContact;
   SafetyBaseline? _safetyBaseline;
   InitReadings? _initReadings;
+  RiderAccount? _account;
+  bool _signInSkipped = false;
+  String? _initRideSkippedFor;
   String _apiUrl = AppConfig.defaultApiUrl;
 
   PhoneInfo get phone => _phone;
@@ -54,6 +59,23 @@ class AppState extends ChangeNotifier {
   CalibrationProfile? get calibration => _calibration;
   RideSummary? get lastRide => _lastRide;
   EmergencyContact? get emergencyContact => _emergencyContact;
+
+  /// The Google account the rider signed in with.
+  RiderAccount? get account => _account;
+
+  /// Debug builds only: sign-in was skipped.
+  bool get signInSkipped => _signInSkipped;
+
+  /// The rider chose to ride without doing the init ride for this bike.
+  /// Rides then learn the phone mount on the go with default settings.
+  bool get initRideSkipped {
+    final bike = _bike;
+    return bike != null &&
+        _initRideSkippedFor == bike.id &&
+        !_calibratedFor(bike);
+  }
+
+  bool _calibratedFor(BikeProfile bike) => _calibration?.bikeId == bike.id;
 
   /// What has been learned about normal riding on the current mount. A new
   /// calibration (possibly a new mount) starts over.
@@ -75,10 +97,12 @@ class AppState extends ChangeNotifier {
 
   /// The first screen depends on how far setup got.
   StartupStep get startupStep {
+    if (_account == null && !_signInSkipped) return StartupStep.signIn;
     final bike = _bike;
     if (bike == null) return StartupStep.bikeSetup;
-    final cal = _calibration;
-    if (cal == null || cal.bikeId != bike.id) return StartupStep.calibration;
+    if (!_calibratedFor(bike) && _initRideSkippedFor != bike.id) {
+      return StartupStep.calibration;
+    }
     return StartupStep.ready;
   }
 
@@ -95,6 +119,9 @@ class AppState extends ChangeNotifier {
     _emergencyContact = _store.emergencyContact;
     _safetyBaseline = _store.safetyBaseline;
     _initReadings = _store.initReadings;
+    _account = _store.account;
+    _signInSkipped = kDebugMode && _store.signInSkipped;
+    _initRideSkippedFor = _store.initRideSkippedFor;
     _apiUrl = _store.apiUrl ?? AppConfig.defaultApiUrl;
     try {
       _phone = await _readPhone();
@@ -126,6 +153,49 @@ class AppState extends ChangeNotifier {
       await _store.setBike(bike);
       await _remote.upsertBike(_riderId, bike);
     }
+  }
+
+  /// Keeps the signed-in account and links it to this rider on the server
+  /// (the rider is upserted first so the link has something to attach to).
+  Future<void> completeSignIn(GoogleSignInResult result) async {
+    _account = result.account;
+    _signInSkipped = false;
+    await _store.setAccount(result.account);
+    await _store.setSignInSkipped(false);
+    final token = result.idToken;
+    if (token != null) {
+      await _remote.upsertRider(_riderId, _phone);
+      await _store.setSentPhone(_phone);
+      await _remote.linkGoogle(_riderId, token);
+    }
+    notifyListeners();
+  }
+
+  /// Debug builds only: use the app without a Google account.
+  Future<void> skipSignIn() async {
+    if (!kDebugMode) return;
+    _signInSkipped = true;
+    await _store.setSignInSkipped(true);
+    notifyListeners();
+  }
+
+  /// Back to the login screen. Bike, calibration and rides stay on the
+  /// phone; signing in again picks them up.
+  Future<void> signOut() async {
+    _account = null;
+    _signInSkipped = false;
+    await _store.setAccount(null);
+    await _store.setSignInSkipped(false);
+    notifyListeners();
+  }
+
+  /// Rides without the init ride for the current bike, until it is done.
+  Future<void> skipInitRide() async {
+    final bike = _bike;
+    if (bike == null) return;
+    _initRideSkippedFor = bike.id;
+    await _store.setInitRideSkippedFor(bike.id);
+    notifyListeners();
   }
 
   /// Creates or updates the bike.

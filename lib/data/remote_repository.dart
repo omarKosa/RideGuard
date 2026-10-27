@@ -25,6 +25,11 @@ class RemoteRepository {
         'os_version': clipText(phone.osVersion, 40),
       });
 
+  /// Links the Google account the rider signed in with; the backend
+  /// verifies [idToken] with Google.
+  Future<void> linkGoogle(String riderId, String idToken) =>
+      _sync.enqueue('PUT', '/v1/riders/$riderId/google', {'id_token': idToken});
+
   /// Backend caps other_make/other_model (clipped); the full text stays in
   /// `model`.
   Future<void> upsertBike(String riderId, BikeProfile bike) =>

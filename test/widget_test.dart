@@ -13,14 +13,21 @@ import 'package:ride_guard/models/bike_choice.dart';
 import 'package:ride_guard/models/calibration_profile.dart';
 import 'package:ride_guard/screens/safety_briefing_screen.dart';
 import 'package:ride_guard/services/app_state.dart';
+import 'package:ride_guard/services/google_auth.dart';
+import 'package:ride_guard/widgets/init_ride_warning_dialog.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fakes.dart';
 
-Future<(AppState, Widget, RecordingBackend)> buildApp() async {
+Future<(AppState, Widget, RecordingBackend)> buildApp({
+  bool signedIn = true,
+  FakeGoogleAuth? googleAuth,
+}) async {
   final stack = offlineFirstStack();
+  final store = await LocalStore.open();
+  if (signedIn && store.account == null) await store.setAccount(testAccount);
   final app = AppState(
-    store: await LocalStore.open(),
+    store: store,
     remote: stack.remote,
     catalogue: realCatalogue(),
   );
@@ -31,6 +38,7 @@ Future<(AppState, Widget, RecordingBackend)> buildApp() async {
     api: ApiClient(baseUrl: () => 'http://x', client: stack.backend.client),
     sensors: FakeSensorSource(),
     emergency: FakeEmergencyPlatform(),
+    googleAuth: googleAuth ?? FakeGoogleAuth(),
   );
   return (app, widget, stack.backend);
 }
@@ -85,21 +93,26 @@ void main() {
       ]),
     );
 
-    // The init ride can't start until every risk is acknowledged.
+    // The risks are only shown in a popup when the rider taps start, and
+    // the init ride can't begin until every one is acknowledged.
+    expect(find.byKey(const Key('ack-0')), findsNothing);
     final start = find.byKey(const Key('start-calibration'));
     await tester.ensureVisible(start);
     await tester.tap(start);
     await tester.pumpAndSettle();
-    expect(find.byType(SafetyBriefingScreen), findsOneWidget);
+    expect(find.byKey(const Key('init-ride-warning')), findsOneWidget);
+    final confirm = find.byKey(const Key('confirm-init-ride'));
+    await tester.tap(confirm);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('init-ride-warning')), findsOneWidget);
 
-    for (var i = 0; i < SafetyBriefingScreen.acknowledgements.length; i++) {
+    for (var i = 0; i < InitRideWarningDialog.acknowledgements.length; i++) {
       final box = find.byKey(Key('ack-$i'));
       await tester.ensureVisible(box);
       await tester.tap(box);
     }
     await tester.pumpAndSettle();
-    await tester.ensureVisible(start);
-    await tester.tap(start);
+    await tester.tap(confirm);
     for (var i = 0; i < 10; i++) {
       await tester.pump(const Duration(milliseconds: 100));
     }
@@ -176,5 +189,192 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('START RIDE'), findsOneWidget);
     expect(find.textContaining('Yamaha MT-07'), findsOneWidget);
+  });
+
+  testWidgets('a new rider signs in with Google first', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    addTearDown(tester.view.reset);
+    final google = FakeGoogleAuth();
+    final (app, widget, backend) = await buildApp(
+      signedIn: false,
+      googleAuth: google,
+    );
+    expect(app.startupStep, StartupStep.signIn);
+    await tester.pumpWidget(widget);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('google-sign-in')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('google-sign-in')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('SET UP YOUR BIKE'), findsOneWidget);
+    expect(app.account!.email, 'mona@example.com');
+    // The rider exists on the server before the account is linked to it.
+    final paths = backend.requests.map((r) => r.url.path).toList();
+    expect(
+      paths,
+      containsAllInOrder([
+        '/v1/riders/${app.riderId}',
+        '/v1/riders/${app.riderId}/google',
+      ]),
+    );
+    final link = backend.bodiesFor('PUT', '/v1/riders/${app.riderId}/google');
+    expect(link.single['id_token'], google.result.idToken);
+
+    // Signed in for good: the next launch skips the login screen.
+    final (reloaded, _, _) = await buildApp(signedIn: false);
+    expect(reloaded.startupStep, StartupStep.bikeSetup);
+  });
+
+  testWidgets('a failed sign-in explains itself; a cancelled one does not', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    addTearDown(tester.view.reset);
+    final google = FakeGoogleAuth()
+      ..error = const GoogleAuthException('Google sign-in failed.');
+    final (app, widget, _) = await buildApp(
+      signedIn: false,
+      googleAuth: google,
+    );
+    await tester.pumpWidget(widget);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('google-sign-in')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('sign-in-error')), findsOneWidget);
+    expect(app.account, isNull);
+
+    google.error = const GoogleAuthException('cancelled', cancelled: true);
+    await tester.tap(find.byKey(const Key('google-sign-in')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('sign-in-error')), findsNothing);
+    expect(find.byKey(const Key('google-sign-in')), findsOneWidget);
+  });
+
+  testWidgets('debug builds can skip sign-in', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    addTearDown(tester.view.reset);
+    final (app, widget, _) = await buildApp(signedIn: false);
+    await tester.pumpWidget(widget);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('skip-sign-in')));
+    await tester.pumpAndSettle();
+    expect(find.text('SET UP YOUR BIKE'), findsOneWidget);
+    expect(app.account, isNull);
+    expect(app.startupStep, StartupStep.bikeSetup);
+  });
+
+  testWidgets('the init ride can be skipped and done later from home', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    addTearDown(tester.view.reset);
+    final (seed, _, _) = await buildApp();
+    await seed.saveBike(
+      const OtherChoice(make: 'Honda', model: 'PCX 125', topSpeedKmh: 105),
+    );
+    final (app, widget, _) = await buildApp();
+    expect(app.startupStep, StartupStep.calibration);
+    await tester.pumpWidget(widget);
+    await tester.pumpAndSettle();
+
+    // Cancelling the warning popup stays on the page.
+    await tester.ensureVisible(find.byKey(const Key('start-calibration')));
+    await tester.tap(find.byKey(const Key('start-calibration')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('cancel-init-ride')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('init-ride-warning')), findsNothing);
+    expect(find.byType(SafetyBriefingScreen), findsOneWidget);
+
+    await tester.ensureVisible(find.byKey(const Key('skip-init-ride')));
+    await tester.tap(find.byKey(const Key('skip-init-ride')));
+    // Home's start button pulses forever, so pump instead of settling.
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    expect(find.text('START RIDE'), findsOneWidget);
+    expect(find.byKey(const Key('init-ride-pending')), findsOneWidget);
+    expect(app.initRideSkipped, isTrue);
+    final (reloaded, _, _) = await buildApp();
+    expect(reloaded.startupStep, StartupStep.ready);
+
+    // From home the init ride is one tap away.
+    await tester.ensureVisible(find.byKey(const Key('do-init-ride')));
+    await tester.tap(find.byKey(const Key('do-init-ride')));
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(find.byType(SafetyBriefingScreen), findsOneWidget);
+  });
+
+  testWidgets('skipping the init ride does not carry over to a new bike', (
+    tester,
+  ) async {
+    final (app, _, _) = await buildApp();
+    await app.saveBike(
+      const OtherChoice(make: 'Honda', model: 'PCX 125', topSpeedKmh: 105),
+    );
+    await app.skipInitRide();
+    expect(app.startupStep, StartupStep.ready);
+    await app.saveBike(
+      const OtherChoice(make: 'Yamaha', model: 'NMAX', topSpeedKmh: 110),
+      differentBike: true,
+    );
+    expect(app.initRideSkipped, isFalse);
+    expect(app.startupStep, StartupStep.calibration);
+  });
+
+  testWidgets('signing out returns to the login screen and keeps the bike', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    addTearDown(tester.view.reset);
+    final (seed, _, _) = await buildApp();
+    await seed.saveBike(
+      const OtherChoice(make: 'Honda', model: 'PCX 125', topSpeedKmh: 105),
+    );
+    await seed.skipInitRide();
+    final google = FakeGoogleAuth();
+    final (app, widget, _) = await buildApp(googleAuth: google);
+    await tester.pumpWidget(widget);
+    await tester.pump(const Duration(milliseconds: 300));
+
+    Future<void> settle() async {
+      for (var i = 0; i < 10; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+    }
+
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await settle();
+    await tester.tap(find.text('Settings'));
+    await settle();
+    final signOut = find.byKey(const Key('sign-out'));
+    await tester.scrollUntilVisible(
+      signOut,
+      300,
+      scrollable: find
+          .descendant(
+            of: find.byType(ListView).last,
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    expect(find.byKey(const Key('account-label')), findsOneWidget);
+    await tester.ensureVisible(signOut);
+    await settle();
+    await tester.tap(signOut);
+    await settle();
+
+    expect(find.byKey(const Key('google-sign-in')), findsOneWidget);
+    expect(google.signOuts, 1);
+    expect(app.account, isNull);
+    expect(app.bike!.model, 'Honda PCX 125');
+    final (reloaded, _, _) = await buildApp(signedIn: false);
+    expect(reloaded.startupStep, StartupStep.signIn);
   });
 }

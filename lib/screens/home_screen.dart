@@ -40,7 +40,8 @@ class _HomeScreenState extends State<HomeScreen>
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
     final bike = app.bike!;
-    final cal = app.calibration;
+    // A calibration from another bike would describe the wrong mount.
+    final cal = app.calibration?.bikeId == bike.id ? app.calibration : null;
     final last = app.lastRide;
 
     return Scaffold(
@@ -76,13 +77,21 @@ class _HomeScreenState extends State<HomeScreen>
                       'calibrate' => _open(const SafetyBriefingScreen()),
                       _ => _open(const SettingsScreen()),
                     },
-                    itemBuilder: (_) => const [
-                      PopupMenuItem(value: 'bike', child: Text('Edit bike')),
+                    itemBuilder: (_) => [
+                      const PopupMenuItem(
+                        value: 'bike',
+                        child: Text('Edit bike'),
+                      ),
                       PopupMenuItem(
                         value: 'calibrate',
-                        child: Text('Redo init ride'),
+                        child: Text(
+                          cal == null ? 'Do init ride' : 'Redo init ride',
+                        ),
                       ),
-                      PopupMenuItem(value: 'settings', child: Text('Settings')),
+                      const PopupMenuItem(
+                        value: 'settings',
+                        child: Text('Settings'),
+                      ),
                     ],
                   ),
                 ],
@@ -97,6 +106,28 @@ class _HomeScreenState extends State<HomeScreen>
                 ),
               ),
               const SizedBox(height: 28),
+              if (cal == null)
+                SectionCard(
+                  key: const Key('init-ride-pending'),
+                  title: 'INIT RIDE',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        'Not done yet. Lean and braking use default settings '
+                        'until you do the short guided init ride.',
+                        style: AppText.body(15, color: AppColors.textMuted),
+                      ),
+                      const SizedBox(height: 12),
+                      OutlinedButton.icon(
+                        key: const Key('do-init-ride'),
+                        onPressed: () => _open(const SafetyBriefingScreen()),
+                        icon: const Icon(Icons.flag_outlined),
+                        label: const Text('DO INIT RIDE'),
+                      ),
+                    ],
+                  ),
+                ),
               if (cal != null)
                 SectionCard(
                   title: 'CALIBRATION',
