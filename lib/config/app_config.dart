@@ -17,6 +17,9 @@ class AppConfig {
   /// `--dart-define=GOOGLE_SERVER_CLIENT_ID=<id>.apps.googleusercontent.com`.
   static const String googleServerClientId = String.fromEnvironment(
     'GOOGLE_SERVER_CLIENT_ID',
+    // Public identifier (not a secret); override at build time if needed.
+    defaultValue:
+        '111524898029-jigisj0ri9nh417ofla9ibm1lkbujte9.apps.googleusercontent.com',
   );
 
   /// Rolling analysis window ("buffer load") in minutes. Fixed by design so
