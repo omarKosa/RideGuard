@@ -12,10 +12,11 @@ import '../../widgets/gauges.dart';
 import '../../widgets/safety_overlay.dart';
 import '../alert_review_screen.dart';
 import '../ride_summary_screen.dart';
-import 'hold_to_stop_button.dart';
+import '../settings/emergency_contact_screen.dart';
 import 'ride_header.dart';
+import 'ride_stats_card.dart';
 import 'speed_chart.dart';
-import 'window_card.dart';
+import 'stop_button.dart';
 
 class RideScreen extends StatelessWidget {
   const RideScreen({super.key});
@@ -85,7 +86,7 @@ class _RideViewState extends State<_RideView> {
     final app = context.watch<AppState>();
     final bike = app.bike!;
     final s = c.state;
-    final window = c.window;
+    final totals = c.totals;
 
     return PopScope(
       canPop: false,
@@ -105,13 +106,17 @@ class _RideViewState extends State<_RideView> {
                 children: [
                   RideHeader(elapsed: c.elapsed),
                   if (app.emergencyContact == null)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 8),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
                       child: WarningBanner(
+                        key: const Key('no-contact-banner'),
                         icon: Icons.contact_phone_outlined,
-                        text:
-                            'No emergency contact: a crash will sound the '
-                            'alarm but call no one. Add one in Settings.',
+                        text: 'No emergency contact',
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const EmergencyContactScreen(),
+                          ),
+                        ),
                       ),
                     ),
                   if (!c.gpsAvailable)
@@ -119,9 +124,7 @@ class _RideViewState extends State<_RideView> {
                       padding: EdgeInsets.only(top: 8),
                       child: WarningBanner(
                         icon: Icons.gps_off,
-                        text:
-                            'GPS unavailable - speed, distance and stop '
-                            'times are paused. Lean still works.',
+                        text: 'GPS unavailable',
                       ),
                     ),
                   if (c.sensorError != null)
@@ -145,28 +148,16 @@ class _RideViewState extends State<_RideView> {
                   Center(
                     child: LeanGauge(
                       leanDeg: s?.leanDeg ?? 0,
-                      maxLeftDeg: window.maxLeanLeftDeg,
-                      maxRightDeg: window.maxLeanRightDeg,
+                      maxLeftDeg: totals.maxLeanLeftDeg,
+                      maxRightDeg: totals.maxLeanRightDeg,
                     ),
                   ),
-                  if ((s?.straightOffsetDeg.abs() ?? 0) >= 1 ||
-                      (s?.mountRealignments ?? 0) > 0)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: Text(
-                        'Mount normalized by '
-                        '${s!.straightOffsetDeg.abs().toStringAsFixed(1)}°'
-                        '${s.mountRealignments > 0 ? ' · re-aligned ${s.mountRealignments}×' : ''}',
-                        textAlign: TextAlign.center,
-                        style: AppText.body(13, color: AppColors.textFaint),
-                      ),
-                    ),
                   const SizedBox(height: 16),
-                  WindowCard(controller: c, window: window),
+                  RideStatsCard(controller: c, totals: totals),
                   const SizedBox(height: 12),
                   SizedBox(height: 170, child: SpeedChart(samples: c.chart)),
                   const SizedBox(height: 20),
-                  HoldToStopButton(onStop: _stop, busy: _stopping),
+                  StopButton(onStop: _stop, busy: _stopping),
                 ],
               ),
             ),

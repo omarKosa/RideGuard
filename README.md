@@ -79,8 +79,16 @@ the app detects it, re-aligns, and counts it.
 ### 4. Rolling-window analysis ("buffer load")
 Processed samples (10 Hz) go into a fixed 15-minute time-windowed buffer
 (`AppConfig.analysisWindowMinutes`). Max speed, max lean left/right, max stop time and best
-deceleration are computed over that window, with whole-ride totals tracked
-separately. Lean below 10 km/h and speed from stale GPS fixes are ignored.
+deceleration are computed over that window (still uploaded for analysis),
+with whole-ride totals tracked separately; the app shows only the whole-ride
+numbers, each with a one-line explanation on tap. Lean below 10 km/h is
+ignored, and distance, top speed and moving time only count while the speed
+is trustworthy (fresh GPS or a few seconds of dead reckoning), so a lost GPS
+signal never keeps adding distance. A parked phone reads 0 km/h: GPS speed
+within its own reported uncertainty, or below 4 m/s with a poor fix while
+the phone is perfectly still, is treated as standing. Phones without a
+gyroscope still detect stillness from the accelerometer, but lean and
+wobble detection need a gyroscope (the ride screen says so).
 
 ### 5. Getting data to the database safely
 Every request goes into a file-backed **outbox**, delivered in order with

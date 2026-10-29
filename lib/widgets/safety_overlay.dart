@@ -58,13 +58,9 @@ String describeWarning(Incident i) {
   final speed = '${i.speedKmh.toStringAsFixed(0)} km/h';
   final measure = hazardMeasure(i);
   return switch (i.kind) {
-    HazardKind.wobble =>
-      'Speed wobble at $speed ($measure). Ease off the throttle smoothly, '
-          'keep a light grip on the bars.',
-    HazardKind.impact =>
-      'Hard impact ($measure) at $speed. Check tyres and wheels when safe.',
-    HazardKind.extremeLean =>
-      'Extreme lean ($measure) at $speed. You are near the limit of grip.',
+    HazardKind.wobble => 'Speed wobble at $speed · ease off smoothly',
+    HazardKind.impact => 'Hard impact ($measure) at $speed',
+    HazardKind.extremeLean => 'Extreme lean ($measure) at $speed',
     HazardKind.crash => 'Crash detected.',
   };
 }
@@ -92,21 +88,20 @@ class _CrashAlert extends StatelessWidget {
       SafetyPhase.countdown => (
         '${safety.secondsLeft}',
         contact == null
-            ? 'No emergency contact set. The alarm keeps sounding.'
+            ? 'No emergency contact'
             : 'Calling ${contact.name} in ${safety.secondsLeft} s',
       ),
       SafetyPhase.called => (
         'CALLED',
         outcome == IncidentOutcome.dialerOpened
-            ? 'Dialer opened for ${contact?.name ?? 'your contact'} - '
-                  'no permission to call directly.'
-            : 'Called ${contact?.name ?? 'your contact'}.',
+            ? 'Dialer opened for ${contact?.name ?? 'your contact'}'
+            : 'Called ${contact?.name ?? 'your contact'}',
       ),
       _ => (
         'ALARM',
         outcome == IncidentOutcome.callFailed
-            ? 'The call to ${contact?.name ?? 'your contact'} failed.'
-            : 'No emergency contact set.',
+            ? 'Call to ${contact?.name ?? 'your contact'} failed'
+            : 'No emergency contact',
       ),
     };
 

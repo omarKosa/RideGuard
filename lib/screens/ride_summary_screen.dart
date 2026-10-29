@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
-import '../core/analysis/ride_analyzer.dart';
 import '../models/incident.dart';
 import '../models/ride_summary.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
+import '../widgets/ride_stats_grid.dart';
 import '../widgets/safety_overlay.dart';
 
 class RideSummaryScreen extends StatelessWidget {
@@ -37,11 +37,9 @@ class RideSummaryScreen extends StatelessWidget {
                 style: AppText.body(16, color: AppColors.textMuted),
               ),
               const SizedBox(height: 16),
-              _StatsCard(title: 'WHOLE RIDE', stats: t),
-              const SizedBox(height: 12),
-              _StatsCard(
-                title: 'LAST ${summary.windowMinutes} MIN',
-                stats: summary.window,
+              SectionCard(
+                title: 'WHOLE RIDE',
+                child: RideStatsGrid(stats: t, showDistance: false),
               ),
               const SizedBox(height: 12),
               SectionCard(
@@ -88,9 +86,8 @@ class RideSummaryScreen extends StatelessWidget {
                 WarningBanner(
                   icon: Icons.screen_rotation_alt,
                   text:
-                      'The phone moved in its mount '
-                      '${summary.mountRealignments}× during the ride; lean '
-                      'was re-normalized automatically. Tighten the holder.',
+                      'Phone moved in its mount ${summary.mountRealignments}×. '
+                      'Tighten the holder.',
                 ),
               ],
               const SizedBox(height: 24),
@@ -102,64 +99,6 @@ class RideSummaryScreen extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _StatsCard extends StatelessWidget {
-  const _StatsCard({required this.title, required this.stats});
-
-  final String title;
-  final RideStats stats;
-
-  @override
-  Widget build(BuildContext context) {
-    return SectionCard(
-      title: title,
-      child: GridView.count(
-        crossAxisCount: 3,
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        mainAxisSpacing: 10,
-        crossAxisSpacing: 10,
-        childAspectRatio: 1.05,
-        children: [
-          StatTile(
-            label: 'TOP SPEED',
-            value: stats.maxSpeedKmh.toStringAsFixed(0),
-            icon: Icons.speed,
-          ),
-          StatTile(
-            label: 'MAX LEAN L',
-            value: '${stats.maxLeanLeftDeg.toStringAsFixed(0)}°',
-            icon: Icons.turn_left,
-            color: AppColors.amber,
-          ),
-          StatTile(
-            label: 'MAX LEAN R',
-            value: '${stats.maxLeanRightDeg.toStringAsFixed(0)}°',
-            icon: Icons.turn_right,
-            color: AppColors.amber,
-          ),
-          StatTile(
-            label: 'MAX STOP TIME',
-            value: '${stats.maxStopTimeS.toStringAsFixed(1)}s',
-            icon: Icons.stop_circle_outlined,
-            color: AppColors.red,
-          ),
-          StatTile(
-            label: 'BEST DECEL',
-            value: stats.bestDecelMps2.toStringAsFixed(1),
-            icon: Icons.south,
-            color: AppColors.red,
-          ),
-          StatTile(
-            label: 'STOPS',
-            value: '${stats.brakeEvents}',
-            icon: Icons.front_hand_outlined,
-          ),
-        ],
       ),
     );
   }

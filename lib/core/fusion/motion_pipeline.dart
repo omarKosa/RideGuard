@@ -233,7 +233,8 @@ class MotionPipeline {
     _linearCount++;
 
     final mount = _mount;
-    if (mount != null && _forwardLearned) {
+    // A phone that hasn't moved adds no speed (sensor bias would).
+    if (!_phoneStill(t) && mount != null && _forwardLearned) {
       _speed.onForwardAccel(mount.forwardOf(_linearLp), t, dt);
     }
   }
@@ -290,7 +291,13 @@ class MotionPipeline {
   void addGps(GpsFix fix) {
     _t = math.max(_t, fix.t);
     final prev = _lastFix;
-    _speed.onGps(fix.speedMps, fix.t);
+    _speed.onGps(
+      fix.speedMps,
+      fix.t,
+      speedAccuracyMps: fix.speedAccuracyMps,
+      accuracyM: fix.accuracyM,
+      phoneStill: _phoneStill(fix.t),
+    );
     _lastFix = fix;
 
     final mount = _mount;
@@ -408,6 +415,10 @@ class MotionPipeline {
   }
 
   /// IMU says still and GPS (when available) does not contradict it.
+  /// The phone itself has not moved for a couple of seconds (IMU only,
+  /// whatever GPS says).
+  bool _phoneStill(double t) => _still.stillFor(t) >= 2.0;
+
   bool _isStill(double t) =>
       _still.isStill && !(_speed.isReliable(t) && _speed.speedMps > 1.0);
 

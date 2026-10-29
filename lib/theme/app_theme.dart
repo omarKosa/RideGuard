@@ -52,6 +52,11 @@ ThemeData buildAppTheme() {
     ),
   );
   return base.copyWith(
+    // No ripple or highlight on taps anywhere in the app.
+    splashFactory: NoSplash.splashFactory,
+    splashColor: Colors.transparent,
+    highlightColor: Colors.transparent,
+    hoverColor: Colors.transparent,
     // google_fonts' *TextTheme helpers target the decoupled material_ui
     // package; applying the family keeps us on flutter/material types.
     textTheme: base.textTheme.apply(

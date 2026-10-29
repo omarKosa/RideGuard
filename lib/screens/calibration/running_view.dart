@@ -30,10 +30,7 @@ class RunningView extends StatelessWidget {
         if (!controller.gpsAvailable)
           const Padding(
             padding: EdgeInsets.only(bottom: 12),
-            child: WarningBanner(
-              icon: Icons.gps_off,
-              text: 'GPS unavailable - riding tasks need location access.',
-            ),
+            child: WarningBanner(icon: Icons.gps_off, text: 'GPS unavailable'),
           ),
         if (controller.sensorError != null)
           Padding(
@@ -49,9 +46,7 @@ class RunningView extends StatelessWidget {
             padding: EdgeInsets.only(bottom: 12),
             child: WarningBanner(
               color: AppColors.red,
-              text:
-                  'Closed track or empty legal road only. You decide what '
-                  'is safe - back off any time.',
+              text: 'Closed track or empty legal road only',
             ),
           ),
         SectionCard(

@@ -122,7 +122,21 @@ class SensorFeed {
   double _lastGyroT = 0;
 
   bool gpsAvailable = false;
-  String? sensorError;
+
+  /// Sensors whose stream failed (usually: the phone has none).
+  final Set<String> missingSensors = {};
+
+  /// One short line for the rider, or null. Linear acceleration alone is
+  /// not worth a warning (only speed between GPS fixes uses it).
+  String? get sensorError {
+    if (missingSensors.contains('accelerometer')) {
+      return 'Your device has no motion sensor';
+    }
+    if (missingSensors.contains('gyroscope')) {
+      return 'Your device has no gyroscope sensor';
+    }
+    return null;
+  }
 
   bool get isRunning => _ticker != null;
 
@@ -134,17 +148,17 @@ class SensorFeed {
     SafetyMonitor? safety,
   }) async {
     await stop();
-    sensorError = null;
+    missingSensors.clear();
     gpsAvailable = await _source.requestLocation() == LocationAccess.granted;
     _clock
       ..reset()
       ..start();
     _lastGyroTs = null;
 
-    void onError(Object e) {
-      sensorError = 'Sensor unavailable: $e';
-      debugPrint(sensorError);
-    }
+    void Function(Object) onError(String sensor) => (Object e) {
+      missingSensors.add(sensor);
+      debugPrint('$sensor unavailable: $e');
+    };
 
     _subs
       ..add(
@@ -152,12 +166,12 @@ class SensorFeed {
           final t = _now;
           pipeline.addAccel(e.value, t);
           safety?.addAccel(e.value, t);
-        }, onError: onError),
+        }, onError: onError('accelerometer')),
       )
       ..add(
         _source.userAccelerometer().listen(
           (e) => pipeline.addLinearAccel(e.value, _now),
-          onError: onError,
+          onError: onError('linear'),
         ),
       )
       ..add(
@@ -166,7 +180,7 @@ class SensorFeed {
           final dt = _gyroDt(e.timestamp, t);
           pipeline.addGyro(e.value, t, dt);
           safety?.addGyro(e.value, t, dt);
-        }, onError: onError),
+        }, onError: onError('gyroscope')),
       );
 
     if (gpsAvailable) {

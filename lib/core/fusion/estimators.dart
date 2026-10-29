@@ -72,15 +72,19 @@ class StillnessDetector {
   }
 
   bool _evaluate() {
-    // Need most of a window of both sensors before judging.
-    if (_gyro.length < 10 || _accel.length < 10) return false;
-    if (_gyro.last.$1 - _gyro.first.$1 < window * 0.8) return false;
-
-    var sum = Vec3.zero;
-    for (final (_, g) in _gyro) {
-      sum += g;
+    // Need most of a window before judging. Phones without a gyroscope are
+    // judged on the accelerometer alone.
+    if (_accel.length < 10) return false;
+    if (_accel.last.$1 - _accel.first.$1 < window * 0.8) return false;
+    if (_gyro.isNotEmpty) {
+      if (_gyro.length < 10) return false;
+      if (_gyro.last.$1 - _gyro.first.$1 < window * 0.8) return false;
+      var sum = Vec3.zero;
+      for (final (_, g) in _gyro) {
+        sum += g;
+      }
+      if ((sum / _gyro.length.toDouble()).length > maxMeanGyro) return false;
     }
-    if ((sum / _gyro.length.toDouble()).length > maxMeanGyro) return false;
 
     if (_linear.isNotEmpty) {
       // Short window so a push is noticed within a few hundred ms.
@@ -221,11 +225,42 @@ class SpeedEstimator {
     return s == SpeedSource.gps || s == SpeedSource.deadReckoning;
   }
 
-  void onGps(double gpsSpeedMps, double t) {
+  /// Below this a GPS speed can be position noise on a parked phone.
+  static const double noiseCeilingMps = 4.0;
+
+  /// GPS accuracy (m) worse than this makes low speeds untrustworthy.
+  static const double poorAccuracyM = 10;
+
+  void onGps(
+    double gpsSpeedMps,
+    double t, {
+    double? speedAccuracyMps,
+    double? accuracyM,
+    bool phoneStill = false,
+  }) {
     if (!gpsSpeedMps.isFinite || gpsSpeedMps < 0) return;
-    // GPS speed jitters around 0.1-0.3 m/s when parked.
-    speedMps = gpsSpeedMps < 0.4 ? 0 : gpsSpeedMps;
+    speedMps = _isNoise(gpsSpeedMps, speedAccuracyMps, accuracyM, phoneStill)
+        ? 0
+        : gpsSpeedMps;
     _lastFixT = t;
+  }
+
+  /// A parked phone's GPS still reports speed: ~0.1-0.3 m/s with a good fix,
+  /// and walking pace or more indoors, where the position wanders.
+  static bool _isNoise(
+    double v,
+    double? speedAccuracy,
+    double? accuracy,
+    bool phoneStill,
+  ) {
+    if (v < 0.4) return true;
+    // Not distinguishable from zero by the receiver's own estimate.
+    if (speedAccuracy != null && speedAccuracy > 0 && v <= speedAccuracy) {
+      return true;
+    }
+    // The phone isn't moving at all and the fix is too poor to argue.
+    final poorFix = accuracy == null || accuracy > poorAccuracyM;
+    return phoneStill && poorFix && v < noiseCeilingMps;
   }
 
   void onForwardAccel(double accel, double t, double dt) {

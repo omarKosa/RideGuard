@@ -81,7 +81,8 @@ class RideAnalyzer {
     }
     if (prev != null) {
       final dt = s.time.difference(prev.time).inMicroseconds / 1e6;
-      if (dt > 0 && dt < 5) {
+      // A held (stale) speed after GPS dropped out is not movement.
+      if (dt > 0 && dt < 5 && prev.speedReliable && s.speedReliable) {
         _distance += (prev.speedKmh + s.speedKmh) / 2 / 3.6 * dt;
         if (s.speedKmh >= movingSpeedKmh) _moving += dt;
       }
@@ -119,7 +120,7 @@ class RideAnalyzer {
       }
       if (prev != null) {
         final dt = s.time.difference(prev.time).inMicroseconds / 1e6;
-        if (dt > 0 && dt < 5) {
+        if (dt > 0 && dt < 5 && prev.speedReliable && s.speedReliable) {
           distance += (prev.speedKmh + s.speedKmh) / 2 / 3.6 * dt;
           if (s.speedKmh >= movingSpeedKmh) moving += dt;
         }

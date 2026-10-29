@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../config/app_config.dart';
 import '../models/ride_summary.dart';
 import '../services/app_state.dart';
 import '../theme/app_theme.dart';
@@ -19,19 +18,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _pulse = AnimationController(
-    duration: const Duration(milliseconds: 1500),
-    vsync: this,
-  )..repeat(reverse: true);
-
-  @override
-  void dispose() {
-    _pulse.dispose();
-    super.dispose();
-  }
-
+class _HomeScreenState extends State<HomeScreen> {
   void _open(Widget screen) => Navigator.of(
     context,
   ).push(MaterialPageRoute<void>(builder: (_) => screen));
@@ -97,14 +84,7 @@ class _HomeScreenState extends State<HomeScreen>
                 ],
               ),
               const SizedBox(height: 32),
-              Center(child: _StartButton(pulse: _pulse)),
-              const SizedBox(height: 12),
-              Center(
-                child: Text(
-                  'Analysis window: last ${AppConfig.analysisWindowMinutes} min',
-                  style: AppText.body(14, color: AppColors.textFaint),
-                ),
-              ),
+              const Center(child: _StartButton()),
               const SizedBox(height: 28),
               if (cal == null)
                 SectionCard(
@@ -189,83 +169,37 @@ class _HomeScreenState extends State<HomeScreen>
 }
 
 class _StartButton extends StatelessWidget {
-  const _StartButton({required this.pulse});
-
-  final AnimationController pulse;
+  const _StartButton();
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 220,
-      height: 220,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          ScaleTransition(
-            scale: Tween<double>(
-              begin: 1.0,
-              end: 1.15,
-            ).animate(CurvedAnimation(parent: pulse, curve: Curves.easeInOut)),
-            child: Container(
-              width: 196,
-              height: 196,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [
-                    AppColors.red.withValues(alpha: 0.2),
-                    Colors.transparent,
-                  ],
-                ),
-              ),
-            ),
+    return GestureDetector(
+      key: const Key('start-ride'),
+      onTap: () => Navigator.of(
+        context,
+      ).push(MaterialPageRoute<void>(builder: (_) => const RideScreen())),
+      child: Container(
+        width: 170,
+        height: 170,
+        decoration: const BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [AppColors.red, AppColors.redDeep],
           ),
-          Material(
-            color: Colors.transparent,
-            shape: const CircleBorder(),
-            child: Ink(
-              width: 170,
-              height: 170,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [AppColors.red, AppColors.redDeep],
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppColors.red.withValues(alpha: 0.5),
-                    blurRadius: 40,
-                    spreadRadius: 8,
-                  ),
-                ],
-              ),
-              child: InkWell(
-                key: const Key('start-ride'),
-                customBorder: const CircleBorder(),
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(builder: (_) => const RideScreen()),
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(
-                      Icons.power_settings_new,
-                      size: 48,
-                      color: Colors.white,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'START RIDE',
-                      style: AppText.display(14).copyWith(letterSpacing: 2),
-                    ),
-                  ],
-                ),
-              ),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.power_settings_new, size: 48, color: Colors.white),
+            const SizedBox(height: 8),
+            Text(
+              'START RIDE',
+              style: AppText.display(14).copyWith(letterSpacing: 2),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

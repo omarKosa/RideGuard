@@ -90,31 +90,36 @@ class StatTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
-      child: Column(
-        children: [
-          Icon(icon, color: color, size: 20),
-          const SizedBox(height: 8),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(value, style: AppText.display(14)),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            style: AppText.body(
-              11,
-              color: AppColors.textMuted,
-            ).copyWith(letterSpacing: 1),
-          ),
-        ],
+      // Shrinks instead of overflowing on small screens and large fonts.
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: color, size: 20),
+            const SizedBox(height: 8),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(value, style: AppText.display(14)),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              style: AppText.body(
+                11,
+                color: AppColors.textMuted,
+              ).copyWith(letterSpacing: 1),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -202,15 +207,19 @@ class WarningBanner extends StatelessWidget {
     required this.text,
     this.icon = Icons.warning_amber_rounded,
     this.color = AppColors.amber,
+    this.onTap,
   });
 
   final String text;
   final IconData icon;
   final Color color;
 
+  /// Makes the banner a shortcut to where the problem is fixed.
+  final VoidCallback? onTap;
+
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final banner = Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -229,9 +238,12 @@ class WarningBanner extends StatelessWidget {
               style: AppText.body(14, color: color, weight: FontWeight.w600),
             ),
           ),
+          if (onTap != null) Icon(Icons.chevron_right, color: color, size: 20),
         ],
       ),
     );
+    final tap = onTap;
+    return tap == null ? banner : GestureDetector(onTap: tap, child: banner);
   }
 }
 
