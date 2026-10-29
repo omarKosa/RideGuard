@@ -18,6 +18,7 @@ from .riders import (
     BikeStatsOut,
     GoogleLinkIn,
     RiderIn,
+    RiderNameIn,
     RiderOut,
 )
 from .rides import (
@@ -41,7 +42,7 @@ __all__ = [
     "CalibrationIn", "CalibrationOut", "ClipIn",
     "IncidentIn", "IncidentKind", "IncidentOut", "IncidentOutcome",
     "LeanMagnitude", "ModelCheckIn", "ModelCheckOut",
-    "RideIn", "RideOut", "RideSummaryIn", "RiderIn", "RiderOut",
+    "RideIn", "RideOut", "RideSummaryIn", "RiderIn", "RiderNameIn", "RiderOut",
     "SafetyStatsIn", "SampleBatchIn", "SampleBatchOut", "SampleIn",
     "SpeedKmh", "StatsIn", "Strict", "Vec3", "WindowAnalysisOut",
 ]

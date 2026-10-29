@@ -29,6 +29,7 @@ class LocalStore {
   static const _safetyBaseline = 'safety_baseline';
   static const _account = 'account';
   static const _signInSkipped = 'sign_in_skipped';
+  static const _displayName = 'display_name';
   static const _initRideSkippedFor = 'init_ride_skipped_for';
   static const _initReadings = 'init_readings';
   static const _sentPhone = 'sent_phone';
@@ -86,6 +87,12 @@ class LocalStore {
   RiderAccount? get account => _read(_account, RiderAccount.fromJson);
   Future<void> setAccount(RiderAccount? a) =>
       a == null ? _prefs.remove(_account) : _write(_account, a.toJson());
+
+  /// The name the rider chose in the app, instead of their Google name.
+  String? get displayName => _prefs.getString(_displayName);
+  Future<void> setDisplayName(String? name) => name == null
+      ? _prefs.remove(_displayName)
+      : _prefs.setString(_displayName, name);
 
   /// Debug builds only: the developer skipped Google sign-in.
   bool get signInSkipped => _prefs.getBool(_signInSkipped) ?? false;

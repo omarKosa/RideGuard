@@ -119,3 +119,28 @@ def test_real_verifier_rejects_garbage(monkeypatch):
     with pytest.raises(InvalidGoogleToken):
         verify_google_id_token("not-a-jwt")
     assert os.getenv("GOOGLE_CLIENT_IDS")
+
+
+async def test_rider_sets_and_changes_their_name(client):
+    rider = await make_rider(client)
+
+    r = await client.put(f"/v1/riders/{rider}/name", json={"name": "  Omar   K "})
+    assert r.status_code == 200, r.text
+    assert r.json()["display_name"] == "Omar K"
+
+    # The outbox may deliver it twice, or after a later phone update.
+    await client.put(f"/v1/riders/{rider}/name", json={"name": "Omar K"})
+    await client.put(f"/v1/riders/{rider}", json={"platform": "android"})
+    assert (await client.get(f"/v1/riders/{rider}")).json()["display_name"] == "Omar K"
+
+    await client.put(f"/v1/riders/{rider}/name", json={"name": "Omar"})
+    assert (await client.get(f"/v1/riders/{rider}")).json()["display_name"] == "Omar"
+
+
+async def test_rider_name_is_validated(client):
+    rider = await make_rider(client)
+    for bad in ("", "   ", "x" * 61):
+        r = await client.put(f"/v1/riders/{rider}/name", json={"name": bad})
+        assert r.status_code == 422, bad
+    missing = await client.put(f"/v1/riders/{new_id()}/name", json={"name": "Omar"})
+    assert missing.status_code == 404

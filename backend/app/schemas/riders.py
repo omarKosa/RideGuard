@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .calibrations import CalibrationOut
 from .common import Strict
@@ -26,6 +26,7 @@ class RiderOut(BaseModel):
     os_version: str | None
     google_email: str | None = None
     google_name: str | None = None
+    display_name: str | None = None
     created_at: datetime
 
 
@@ -33,6 +34,20 @@ class GoogleLinkIn(Strict):
     """The ID token from Google sign-in on the phone."""
 
     id_token: Annotated[str, Field(min_length=20, max_length=4096)]
+
+
+class RiderNameIn(Strict):
+    """The name the rider typed. Whitespace-only is rejected."""
+
+    name: Annotated[str, Field(min_length=1, max_length=60)]
+
+    @field_validator("name")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        v = " ".join(v.split())
+        if not v:
+            raise ValueError("name must not be blank")
+        return v
 
 
 # ---------------------------------------------------------------------- bikes

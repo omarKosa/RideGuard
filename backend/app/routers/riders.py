@@ -1,3 +1,4 @@
+import logging
 from typing import Annotated
 from uuid import UUID
 
@@ -15,9 +16,12 @@ from ..schemas import (
     GoogleLinkIn,
     RideOut,
     RiderIn,
+    RiderNameIn,
     RiderOut,
 )
 from .rides import RIDE_COLUMNS
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1", tags=["riders & bikes"])
 BIKE_COLUMNS = (
@@ -27,7 +31,7 @@ BIKE_COLUMNS = (
 )
 RIDER_COLUMNS = (
     "id, platform, phone_model, os_version, google_email, google_name, "
-    "created_at"
+    "display_name, created_at"
 )
 Conn = Annotated[asyncpg.Connection, Depends(get_conn)]
 
@@ -63,6 +67,24 @@ async def get_rider(rider_id: UUID, conn: Conn):
     return dict(row)
 
 
+@router.put("/riders/{rider_id}/name", response_model=RiderOut)
+async def set_rider_name(rider_id: UUID, body: RiderNameIn, conn: Conn):
+    """Sets the name the rider chose. Idempotent (last write wins), so the
+    app's outbox can retry it from any network address."""
+    row = await conn.fetchrow(
+        f"""
+        UPDATE riders SET display_name = $2, updated_at = now()
+        WHERE id = $1
+        RETURNING {RIDER_COLUMNS}
+        """,
+        rider_id,
+        body.name,
+    )
+    if row is None:
+        raise not_found("Rider")
+    return dict(row)
+
+
 @router.put("/riders/{rider_id}/google", response_model=RiderOut)
 async def link_google(
     rider_id: UUID, body: GoogleLinkIn, request: Request, conn: Conn
@@ -75,7 +97,8 @@ async def link_google(
         identity = await run_in_threadpool(verify, body.id_token)
     except GoogleNotConfigured:
         raise HTTPException(503, "Google sign-in is not configured on the server")
-    except InvalidGoogleToken:
+    except InvalidGoogleToken as exc:
+        logger.warning("Google token rejected: %s", exc)
         raise HTTPException(401, "Invalid Google sign-in token")
     async with conn.transaction():
         if not await conn.fetchval("SELECT 1 FROM riders WHERE id = $1", rider_id):

@@ -48,22 +48,13 @@ class SafetyBriefingScreen extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  'A short guided ride teaches RideGuard how your phone sits '
-                  'on your bike, so lean, speed and braking read right.',
+                  'Mount the phone how you will ride with it, then follow the '
+                  'steps. Tap a step for details.',
                   style: AppText.body(15, color: AppColors.textMuted),
                 ),
-                const SizedBox(height: 20),
-                Text('WHAT YOU WILL DO', style: AppText.label(12)),
-                const SizedBox(height: 10),
+                const SizedBox(height: 16),
                 for (final (i, task) in CalibrationTask.values.indexed)
                   _TaskRow(index: i + 1, task: task),
-                const SizedBox(height: 8),
-                Text(
-                  'Mount the phone exactly how you will ride with it - any '
-                  'angle works. The app learns how it sits and normalizes the '
-                  'lean reading so upright reads 0°.',
-                  style: AppText.body(14, color: AppColors.textMuted),
-                ),
                 const SizedBox(height: 24),
                 PrimaryButton(
                   key: const Key('start-calibration'),
@@ -78,12 +69,6 @@ class SafetyBriefingScreen extends StatelessWidget {
                     onPressed: () => _skip(context),
                     child: const Text('SKIP FOR NOW'),
                   ),
-                  Text(
-                    'You can ride right away; readings are less accurate '
-                    'until you do the init ride from the home screen.',
-                    textAlign: TextAlign.center,
-                    style: AppText.body(13, color: AppColors.textFaint),
-                  ),
                 ],
               ],
             ),
@@ -94,49 +79,68 @@ class SafetyBriefingScreen extends StatelessWidget {
   }
 }
 
-class _TaskRow extends StatelessWidget {
+class _TaskRow extends StatefulWidget {
   const _TaskRow({required this.index, required this.task});
 
   final int index;
   final CalibrationTask task;
 
   @override
+  State<_TaskRow> createState() => _TaskRowState();
+}
+
+class _TaskRowState extends State<_TaskRow> {
+  bool _open = false;
+
+  @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          CircleAvatar(
-            radius: 13,
-            backgroundColor: AppColors.cyan.withValues(alpha: 0.15),
-            child: Text(
-              '$index',
-              style: AppText.body(
-                13,
-                color: AppColors.cyan,
-                weight: FontWeight.bold,
+    return InkWell(
+      onTap: () => setState(() => _open = !_open),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CircleAvatar(
+              radius: 13,
+              backgroundColor: AppColors.cyan.withValues(alpha: 0.15),
+              child: Text(
+                '${widget.index}',
+                style: AppText.body(
+                  13,
+                  color: AppColors.cyan,
+                  weight: FontWeight.bold,
+                ),
               ),
             ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  task.title.toUpperCase(),
-                  style: AppText.label(13, color: Colors.white),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  task.instruction,
-                  style: AppText.body(14, color: AppColors.textMuted),
-                ),
-              ],
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      widget.task.title.toUpperCase(),
+                      style: AppText.label(13, color: Colors.white),
+                    ),
+                  ),
+                  if (_open) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      widget.task.instruction,
+                      style: AppText.body(14, color: AppColors.textMuted),
+                    ),
+                  ],
+                ],
+              ),
             ),
-          ),
-        ],
+            Icon(
+              _open ? Icons.expand_less : Icons.expand_more,
+              color: AppColors.textMuted,
+            ),
+          ],
+        ),
       ),
     );
   }

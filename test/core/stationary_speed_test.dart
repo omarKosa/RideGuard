@@ -47,6 +47,13 @@ RideSample _sample(int i, double kmh, SpeedSource source) => RideSample(
 );
 
 void main() {
+  test('a phone without a gyroscope can still capture the still reference', () {
+    final p = _NoGyro();
+    final sim = RideSimulator(mount: Mount.handlebarPortrait);
+    sim.still(p, 6);
+    expect(p.captureStillReference(), isTrue);
+  });
+
   test('a parked phone with jittery indoor GPS reads 0 km/h', () {
     final p = _IndoorGps();
     final sim = RideSimulator(mount: Mount.handlebarPortrait);

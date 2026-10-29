@@ -166,6 +166,10 @@ class MotionPipeline {
   Vec3 _stillLinearSum = Vec3.zero;
   int _stillGravityN = 0;
   int _stillGyroN = 0;
+
+  /// A gyroscope has delivered data; phones without one calibrate on the
+  /// accelerometer alone (gyro bias stays zero).
+  bool _gyroSeen = false;
   int _stillLinearN = 0;
 
   MountOrientation? get mount => _mount;
@@ -245,6 +249,7 @@ class MotionPipeline {
     if (!rate.isFinite) return;
     _t = math.max(_t, t);
     dt = dt.clamp(0.001, 0.1).toDouble();
+    _gyroSeen = true;
     _still.addGyro(rate, t);
 
     final parked = _speed.speedMps < 0.5 || !_speed.isReliable(t);
@@ -318,9 +323,12 @@ class MotionPipeline {
   /// Locks in up axis, gyro bias and accelerometer bias from the current
   /// still period. Returns false if there is not enough still data.
   bool captureStillReference() {
-    if (_stillGravityN < 20 || _stillGyroN < 20) return false;
+    if (_stillGravityN < 20) return false;
+    if (_gyroSeen && _stillGyroN < 20) return false;
     final up = _stillGravitySum / _stillGravityN.toDouble();
-    _gyroBias = _stillGyroSum / _stillGyroN.toDouble();
+    if (_stillGyroN >= 20) {
+      _gyroBias = _stillGyroSum / _stillGyroN.toDouble();
+    }
     if (_stillLinearN >= 20) {
       _linearBias = _stillLinearSum / _stillLinearN.toDouble();
     }

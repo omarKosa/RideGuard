@@ -48,6 +48,7 @@ class AppState extends ChangeNotifier {
   SafetyBaseline? _safetyBaseline;
   InitReadings? _initReadings;
   RiderAccount? _account;
+  String? _displayName;
   bool _signInSkipped = false;
   String? _initRideSkippedFor;
   String _apiUrl = AppConfig.defaultApiUrl;
@@ -62,6 +63,13 @@ class AppState extends ChangeNotifier {
 
   /// The Google account the rider signed in with.
   RiderAccount? get account => _account;
+
+  /// Longest name the backend accepts.
+  static const maxNameLength = 60;
+
+  /// What to call the rider: the name they chose, else their Google name or
+  /// email, else null (debug build without sign-in).
+  String? get displayName => _displayName ?? _account?.label;
 
   /// Debug builds only: sign-in was skipped.
   bool get signInSkipped => _signInSkipped;
@@ -120,6 +128,7 @@ class AppState extends ChangeNotifier {
     _safetyBaseline = _store.safetyBaseline;
     _initReadings = _store.initReadings;
     _account = _store.account;
+    _displayName = _store.displayName;
     _signInSkipped = kDebugMode && _store.signInSkipped;
     _initRideSkippedFor = _store.initRideSkippedFor;
     _apiUrl = _store.apiUrl ?? AppConfig.defaultApiUrl;
@@ -171,6 +180,21 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Changes the name shown for the rider. Saved on the phone straight
+  /// away; the server copy goes through the outbox, which keeps retrying
+  /// while the phone's network changes during a ride. Returns false for a
+  /// name that is blank or too long.
+  Future<bool> renameRider(String name) async {
+    final clean = name.trim().split(RegExp(r'\s+')).join(' ');
+    if (clean.isEmpty || clean.length > maxNameLength) return false;
+    if (clean == displayName) return true;
+    _displayName = clean;
+    await _store.setDisplayName(clean);
+    notifyListeners();
+    await _remote.setRiderName(_riderId, clean);
+    return true;
+  }
+
   /// Debug builds only: use the app without a Google account.
   Future<void> skipSignIn() async {
     if (!kDebugMode) return;
@@ -183,8 +207,10 @@ class AppState extends ChangeNotifier {
   /// phone; signing in again picks them up.
   Future<void> signOut() async {
     _account = null;
+    _displayName = null;
     _signInSkipped = false;
     await _store.setAccount(null);
+    await _store.setDisplayName(null);
     await _store.setSignInSkipped(false);
     notifyListeners();
   }

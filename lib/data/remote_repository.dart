@@ -30,6 +30,11 @@ class RemoteRepository {
   Future<void> linkGoogle(String riderId, String idToken) =>
       _sync.enqueue('PUT', '/v1/riders/$riderId/google', {'id_token': idToken});
 
+  /// The name the rider chose. A PUT keyed by rider id, so the outbox can
+  /// resend it from any network address and the last one wins.
+  Future<void> setRiderName(String riderId, String name) =>
+      _sync.enqueue('PUT', '/v1/riders/$riderId/name', {'name': name});
+
   /// Backend caps other_make/other_model (clipped); the full text stays in
   /// `model`.
   Future<void> upsertBike(String riderId, BikeProfile bike) =>
